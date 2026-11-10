@@ -126,7 +126,33 @@ let packages=n.match(/(\d+(?:[.,]\d+)?)\s*(?:garrafas?|botellas?|envases?|cajas?
 if(packages)match=[null,String(num(packages[1])*num(packages[2])),packages[3]];
 if(!match)throw Error('No encuentro la cantidad y unidad. Ejemplo: «6 kg» o «450 difusores».');let qty=num(match[1]),rawUnit=norm(match[2]);let unit=/^(kg|kilo)/.test(rawUnit)?'kg':/^(g|gramo)/.test(rawUnit)?'g':/^(l|litro)/.test(rawUnit)?'L':/^(cm3|cc|centimetro)/.test(rawUnit)?'cm³':'ud.';
 if(baseUnit(unit)!==baseUnit(product.unit))throw Error('La unidad detectada es incompatible con el producto.');let matches=kind==='tratamiento'?model.plans.filter(pl=>pl.customerId===customer.id).flatMap(pl=>pl.lines.filter(l=>l.productId===product.id).map(l=>l.id)):[];return {view:false,kind,customerId:customer.id,productId:product.id,planLineId:matches.length===1?matches[0]:'',qty,qtyUnit:unit,date:today(),notes:'Orden interpretada: '+s}}
-function showInterpret(){let out=$('interpretResult');try{let r=interpret($('command').value);if(r.view){out.innerHTML=`<div class="alert good"><b>${esc(cName(r.customerId))}</b><br>${productsFor(r.customerId).map(p=>`${esc(p.name)}: ${stockView(r.customerId,p.id)}`).join('<br>')||'Sin existencias'}</div><button class="btn alt" id="gotoResult">Abrir ficha</button>`;$('gotoResult').onclick=()=>{selected=r.customerId;customerTab='stock';navigate('cliente')}}else{pendingAction=r;out.innerHTML=`<div class="alert good"><b>Orden interpretada, pendiente de confirmación</b><br>${esc(r.kind)} · ${esc(cName(r.customerId))}<br>${esc(pName(r.productId))} · ${fmt(r.qty)} ${esc(r.qtyUnit)}</div><button class="btn" id="gotoMovement">Revisar y confirmar</button>`;$('gotoMovement').onclick=()=>navigate('movimientos')}}catch(err){out.innerHTML=`<div class="alert error">${esc(err.message)}</div>`}}
+async function confirmSpokenMovement(r){
+if(!r||r.view)return;
+try{
+const f=new FormData();
+for(const [k,v] of Object.entries({kind:r.kind,customer:r.customerId,product:r.productId,qty:r.qty,qtyUnit:r.qtyUnit,date:r.date||today(),planLine:r.planLineId||'',plot:r.plot||'',area:r.area||'',notes:r.notes||''}))f.append(k,String(v));
+const m=validateMove(f);
+const unit=prod(m.productId).unit;
+const msg=cName(m.customerId)+' · '+pName(m.productId)+'\nOperación: '+m.kind+'\nCantidad: '+fmt(m.qty)+' '+m.qtyUnit+'\nStock anterior: '+fmt(fromBase(m.before,unit))+' '+unit+'\nStock resultante: '+fmt(fromBase(m.after,unit))+' '+unit+(m.after<0?'\nATENCIÓN: stock negativo.':'');
+if(!confirm(msg+'\n\n¿Guardar este registro?'))return;
+model.movements.push({...m,id:id(),recorded:stamp(),technician:model.tech});
+await save();selected=m.customerId;pendingAction=null;customerTab='historial';navigate('cliente');t('Movimiento registrado desde voz o texto');
+}catch(err){t('No se pudo registrar: '+err.message,'error')}
+}
+function showInterpret(){let out=$('interpretResult');try{
+let r=interpret($('command').value);
+if(r.view){out.innerHTML=`<div class="alert good"><b>${esc(cName(r.customerId))}</b><br>${productsFor(r.customerId).map(p=>`${esc(p.name)}: ${stockView(r.customerId,p.id)}`).join('<br>')||'Sin existencias'}</div><button class="btn alt" id="gotoResult">Abrir ficha</button>`;$('gotoResult').onclick=()=>{selected=r.customerId;customerTab='stock';navigate('cliente')}}
+else{
+pendingAction=r;
+const unit=prod(r.productId)?.unit||r.qtyUnit;
+const before=stockBase(r.customerId,r.productId);
+const quantity=toBase(r.qty,r.qtyUnit);
+const after=r.kind==='revision'?quantity:before+(r.kind==='entrada'?quantity:-quantity);
+out.innerHTML=`<div class="alert good"><b>Orden reconocida: comprueba los datos</b><br>${esc(r.kind)} · ${esc(cName(r.customerId))}<br>${esc(pName(r.productId))} · ${fmt(r.qty)} ${esc(r.qtyUnit)}<br>Stock actual: ${fmt(fromBase(before,unit))} ${esc(unit)}<br><strong>Stock después: ${fmt(fromBase(after,unit))} ${esc(unit)}</strong></div><div class="actions"><button class="btn" id="confirmSpoken">✅ Confirmar y guardar ahora</button><button class="btn alt" id="gotoMovement">✏️ Revisar en formulario</button></div>`;
+$('confirmSpoken').onclick=()=>confirmSpokenMovement(r);
+$('gotoMovement').onclick=()=>navigate('movimientos');
+}
+}catch(err){out.innerHTML=`<div class="alert error">${esc(err.message)}</div>`}}
 function dictate(){let SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){t('El micrófono integrado no está disponible. Usa el dictado del teclado del teléfono.','error');return}let r=new SR;r.lang='es-ES';r.interimResults=false;r.maxAlternatives=1;r.onresult=e=>{$('command').value=($('command').value+' '+e.results[0][0].transcript).trim();t('Dictado recibido. Revisa el texto antes de interpretarlo.')};r.onerror=e=>t('No se pudo completar el dictado: '+e.error,'error');try{r.start();t('Escuchando...')}catch(e){t(e.message,'error')}}
 
 // Planes de abonado: objetivos por producto, campaña y parcela; cada aplicación se vincula expresamente a una línea.
