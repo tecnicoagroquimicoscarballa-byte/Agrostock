@@ -48,7 +48,7 @@ for(const obj of cloud[key]||[]){
 if(!obj||!obj.id)throw Error('Registro remoto sin ID en '+key);
 if(!byId.has(obj.id)){byId.set(obj.id,own.length);own.push(obj);}
 else{
-const stable=x=>JSON.stringify(x,Object.keys(x).sort());
+const stable=x=>JSON.stringify(x,function(k,v){if(v&&typeof v==='object'&&!Array.isArray(v)){return Object.keys(v).sort().reduce((o,key)=>(o[key]=v[key],o),{});}return v;});
 if(stable(own[byId.get(obj.id)])!==stable(obj))conflicts.push(key+'/'+obj.id);
 }
 }
