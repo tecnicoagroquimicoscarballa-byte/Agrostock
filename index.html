@@ -417,7 +417,7 @@ return `${head('Clientes',active.length+' clientes activos de 100 · '+archived.
 <div class="row between"><h2>Listado</h2><input id="searchCustomers" style="max-width:240px" placeholder="Buscar cliente..." value="${esc(filter)}"></div>
 <div class="actions"><button type="button" class="btn ${!showArchivedCustomers?'':'alt'}" data-list-status="activos">Activos (${active.length})</button><button type="button" class="btn ${showArchivedCustomers?'':'alt'}" data-list-status="baja">Dados de baja (${archived.length})</button></div>
 ${list.length?`<div class="tablewrap"><table><thead><tr><th>Cliente</th><th>Referencia</th><th>Productos</th><th></th></tr></thead><tbody>${list.map(c=>`<tr class="click" data-client="${c.id}"><td><b>${esc(c.name)}</b><div class="muted">${esc(c.place||'')}${showArchivedCustomers?' · Baja':''}</div></td><td>${esc(c.ref||'—')}</td><td>${productsFor(c.id).length}</td><td>Ver →</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay clientes en este listado.</div>'}
-</div></div><div class="full card">${customerDirectoryPanel()}</div><div class="full card"><h2>Crear cliente manualmente</h2><form id="createCustomer" class="stack">
+</div><div class="full card">${customerDirectoryPanel()}</div><div class="full card"><h2>Crear cliente manualmente</h2><form id="createCustomer" class="stack">
 ${input('Nombre del cliente *','name','text','','required maxlength="120"')}
 ${input('Código / referencia (opcional)','ref')}
 ${input('Municipio (opcional)','place')}${input('Teléfono (opcional)','phone','tel')}
