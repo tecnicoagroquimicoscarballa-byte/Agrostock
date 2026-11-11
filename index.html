@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='23', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='24', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],updated:''};
@@ -261,12 +261,48 @@ function stockView(cid,pid){const p=prod(pid);return p?fmt(fromBase(stockBase(ci
 function signed(m){let p=prod(m.productId);if(!p)return '';let value=fromBase(m.delta,p.unit);return (value>0?'+':'')+fmt(value)+' '+p.unit}
 function productsFor(cid){let set=new Set(model.movements.filter(x=>x.customerId===cid).map(x=>x.productId));return [...set].map(id=>prod(id)).filter(Boolean).sort((a,b)=>a.name.localeCompare(b.name))}
 const customerOptions=(selectedId='')=>'<option value="">Selecciona un cliente</option>'+model.customers.filter(c=>!clientArchived(c.id)||c.id===selectedId).map(c=>`<option value="${esc(c.id)}" ${selectedId===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
-const productOptions=(selectedId='')=>'<option value="">Selecciona un producto</option>'+model.products.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<option value="${esc(p.id)}" ${selectedId===p.id?'selected':''}>${esc(p.name)} (${esc(p.unit)})</option>`).join('');
+const productOptions=(selectedId='')=>'<option value="">Selecciona un producto</option>'+model.products.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<option value="${esc(p.id)}" ${selectedId===p.id?'selected':''}>${esc(p.name)} (${esc(p.unit)})${p.code?' · Ref. '+esc(p.code):''}${p.registration?' · Reg. '+esc(p.registration):''}</option>`).join('');
 const input=(label,name,kind='text',value='',attrs='')=>`<div class="field"><label for="${name}">${label}</label><input id="${name}" name="${name}" type="${kind}" value="${esc(value)}" ${attrs}></div>`;
 const select=(label,name,opts)=>`<div class="field"><label for="${name}">${label}</label><select name="${name}" id="${name}" required>${opts}</select></div>`;
 const head=(title,subtitle='')=>`<div class="row between" style="margin-bottom:14px"><div><h1>${title}</h1>${subtitle?`<div class="muted">${subtitle}</div>`:''}</div></div>`;
 function navigate(s,cid=''){screen=s;if(cid)selected=cid;render();window.scrollTo({top:0,behavior:'instant'})}
-function render(){let items=[['inicio','🏠 Inicio'],['clientes','👥 Clientes'],['movimientos','📦 Movimientos'],['planes','🌿 Abonado'],['visitas','📝 Visitas'],['pedidos','🛒 Pedidos'],['alertas','⏰ Alertas'],['comandos','🎙️ Entrada rápida'],['documentos','📷 Documentos'],['datos','⚙️ Datos y copias']];$('nav').innerHTML=items.map(([s,n])=>`<button class="${screen===s?'active':''}" data-nav="${s}">${n}</button>`).join('');$('app').innerHTML=({inicio:home,clientes:customersScreen,cliente:detail,movimientos:movementScreen,comandos:commandScreen,documentos:documentsScreen,planes:plansScreen,visitas:visitsScreen,pedidos:ordersScreen,alertas:alertsScreen,datos:dataScreen})[screen]();wire();}
+
+// Los selectores mantienen su valor real, aunque el usuario filtre la lista;
+// solamente se muestran las primeras 70 coincidencias para acelerar Android.
+function installQuickSearch(){
+const selectElements=[...document.querySelectorAll('select')];
+for(const sel of selectElements){
+const all=[...sel.options].map(o=>({value:o.value,text:o.text,disabled:o.disabled}));
+if(all.length<12&&!['product','customer','quickCustomer','shareCustomer'].includes(sel.id))continue;
+if(sel.closest('.quick-select-wrap'))continue;
+const wrap=document.createElement('div');wrap.className='quick-select-wrap';
+sel.parentNode.insertBefore(wrap,sel);wrap.appendChild(sel);
+const search=document.createElement('input');
+search.type='search';search.autocomplete='off';search.placeholder='🔎 Buscar por nombre, código o registro…';search.className='quick-select-search';
+search.setAttribute('aria-label','Buscar en '+(sel.id||'listado'));
+wrap.insertBefore(search,sel);
+const note=document.createElement('small');note.className='muted';note.style.display='block';note.style.marginTop='3px';
+wrap.appendChild(note);
+let current=sel.value;
+const rebuild=(needle='')=>{
+const normalized=norm(needle),matches=all.filter(o=>o.value&&norm(o.text).includes(normalized));
+const included=matches.slice(0,70),keep=all.find(o=>o.value===current);
+const choices=[all.find(o=>!o.value),keep,...included].filter(Boolean);
+const used=new Set();
+const html=choices.filter(o=>{if(used.has(o.value))return false;used.add(o.value);return true;});
+sel.replaceChildren(...html.map(o=>{const el=document.createElement('option');el.value=o.value;el.textContent=o.text;el.disabled=o.disabled;return el;}));
+if(!matches.length&&needle){const empty=document.createElement('option');empty.value='';empty.disabled=true;empty.textContent='No hay coincidencias';sel.appendChild(empty);}
+sel.value=current;
+if(sel.value!==current)sel.value='';
+note.textContent=normalized?(matches.length?matches.length+' coincidencia(s)'+(matches.length>70?' · mostrando las primeras 70':''):'Sin coincidencias'):'Escribe para filtrar · '+(all.length-1)+' opciones disponibles';
+};
+search.addEventListener('input',()=>rebuild(search.value));
+sel.addEventListener('change',()=>{current=sel.value;});
+search.addEventListener('search',()=>rebuild(search.value));
+rebuild();
+}
+}
+function render(){let items=[['inicio','🏠 Inicio'],['clientes','👥 Clientes'],['movimientos','📦 Movimientos'],['planes','🌿 Abonado'],['visitas','📝 Visitas'],['pedidos','🛒 Pedidos'],['alertas','⏰ Alertas'],['comandos','🎙️ Entrada rápida'],['documentos','📷 Documentos'],['datos','⚙️ Datos y copias']];$('nav').innerHTML=items.map(([s,n])=>`<button class="${screen===s?'active':''}" data-nav="${s}">${n}</button>`).join('');$('app').innerHTML=({inicio:home,clientes:customersScreen,cliente:detail,movimientos:movementScreen,comandos:commandScreen,documentos:documentsScreen,planes:plansScreen,visitas:visitsScreen,pedidos:ordersScreen,alertas:alertsScreen,datos:dataScreen})[screen]();wire();installQuickSearch();}
 function home(){const due=allAlertStates().filter(a=>a.state==='vencida');const negatives=model.customers.flatMap(c=>productsFor(c.id).filter(p=>stockBase(c.id,p.id)<-0.00001).map(p=>({c,p})));return `<div class="hero"><h1>Gestión de clientes</h1><div class="actions"><button class="btn" data-nav="clientes">Ver clientes</button><button class="btn" data-home-move="entrada">+ Compra / entrada</button><button class="btn" data-home-move="tratamiento">− Tratamiento</button><button class="btn" data-nav="comandos">🎙️ Voz, texto y foto</button><button class="btn" data-nav="visitas">📝 Visita</button><button class="btn" data-nav="pedidos">🛒 Pedido</button></div></div><div class="card" style="margin:14px 0"><h2>🎙️ Registrar por voz, texto o fotografía</h2><p class="muted">Habla, escribe o adjunta una fotografía. Comprueba los datos reconocidos antes de guardarlos.</p>${quickEntryUI()}</div><div class="grid"><div class="third stat"><div class="muted">Clientes</div><div class="n">${model.customers.filter(c=>!clientArchived(c.id)).length} / 100</div></div><div class="full card"><div class="row between"><h2>⏰ Alertas de seguimiento vencidas: ${due.length}</h2><button class="btn alt" data-nav="alertas">Ver alertas</button></div>${due.length?due.slice(0,10).map(a=>`<div class="alert" style="margin:7px 0">${esc(cName(a.customerId))} · ${esc(a.plot||'Todas las parcelas')} · ${a.elapsed} días desde la última aplicación (${a.days} días definidos por el técnico)</div>`).join(''):'<p class="muted">No hay alertas vencidas configuradas.</p>'}</div><div class="twoThird card"><h2>Movimientos recientes</h2>${movementTable(model.movements.slice().reverse().slice(0,9),true)}</div><div class="third card"><h2>Panel de control</h2><div class="stack"><span class="pill ${negatives.length?'red':''}">${negatives.length} existencias negativas</span>${negatives.slice(0,8).map(x=>`<div class="small">${esc(x.c.name)} · ${esc(x.p.name)}: ${stockView(x.c.id,x.p.id)}</div>`).join('')}<div class="notice">Los registros se almacenan únicamente en este navegador y dispositivo. Exporta copias antes de cambiar de teléfono o borrar sus datos.</div><button class="btn alt" id="backupNow">Descargar respaldo completo</button></div></div></div>`}
 function customersScreen(){
 const active=model.customers.filter(c=>!clientArchived(c.id));
