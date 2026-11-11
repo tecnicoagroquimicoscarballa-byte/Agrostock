@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='47', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='48', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -602,7 +602,7 @@ let add=[],ignored=0,pending=0,invalid=0;
 for(const item of parsed.products){
 if(!item||typeof item.name!=='string'||!item.name.trim()||typeof item.code!=='string'||!item.code.trim()||!allowedUnit.has(item.unit)||!allowedCategory.has(item.category)){invalid++;continue;}
 const key='carballa-'+item.code.trim();
-if(ids.has(key)||codes.has(item.code.trim())||names.has(norm(item.name))){ignored++;continue;}
+if(ids.has(key)||codes.has(item.code.trim())){ignored++;continue;}
 const p={id:key,code:item.code.trim(),name:item.name.trim(),unit:item.unit,category:item.category,registration:String(item.registration||'').trim(),registrationSource:item.registrationSource||'Listado Carballa (pendiente comprobación oficial)',origin:'catalogo_carballa',package:item.package||'',sourceType:item.sourceType||'',categoryPendingReview:!!item.categoryPendingReview,created:stamp(),familyName:String(item.familyName||'').trim(),commercialFormat:String(item.commercialFormat||'').trim(),stockMode:['envases','contenido','unidades'].includes(item.stockMode)?item.stockMode:undefined,regulatoryClassification:String(item.regulatoryClassification||'').trim(),regulatoryEvidence:String(item.regulatoryEvidence||'').trim(),registroEstado:String(item.registroEstado||'PENDIENTE_VERIFICACION_OFICIAL').trim()};
 add.push(p);ids.add(key);codes.add(p.code);names.add(norm(p.name));if(p.categoryPendingReview)pending++;
 }
