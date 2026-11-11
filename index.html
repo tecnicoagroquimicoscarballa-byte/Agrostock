@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='26', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='27', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],updated:''};
@@ -296,7 +296,7 @@ function navigate(s,cid=''){screen=s;if(cid)selected=cid;render();window.scrollT
 function installQuickSearch(){
 if(!document.getElementById('ag-combobox-style')){
 const style=document.createElement('style');style.id='ag-combobox-style';
-style.textContent='.ag-combo{position:relative;width:100%}.ag-combo-input{width:100%;box-sizing:border-box;padding-right:36px!important}.ag-combo-icon{position:absolute;right:13px;top:12px;pointer-events:none;opacity:.65}.ag-combo-menu{position:absolute;left:0;right:0;top:calc(100% + 3px);max-height:245px;overflow-y:auto;overscroll-behavior:contain;background:var(--card,#fff);background-color:#fff;color:#202b24;border:1px solid #b9c6bd;border-radius:10px;z-index:110;box-shadow:0 7px 22px #0003}.ag-combo-item{display:block;width:100%;text-align:left;padding:11px 13px;border:0;border-bottom:1px solid #e9eee9;background:#fff;color:#1d3325;font:inherit;cursor:pointer;overflow-wrap:anywhere}.ag-combo-item:focus,.ag-combo-item:hover,.ag-combo-item.ag-active{background:#e8f3ec}.ag-combo-empty{padding:12px;color:#56625a}';
+style.textContent='.ag-combo{position:relative;width:100%}.ag-combo-input{width:100%;box-sizing:border-box;padding-right:68px!important}.ag-combo-clear{position:absolute;right:34px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:#46554a;font:inherit;font-size:22px;line-height:1;padding:4px 6px;cursor:pointer;z-index:2}.ag-combo-clear[hidden]{display:none}.ag-combo-icon{position:absolute;right:13px;top:12px;pointer-events:none;opacity:.65}.ag-combo-menu{position:absolute;left:0;right:0;top:calc(100% + 3px);max-height:245px;overflow-y:auto;overscroll-behavior:contain;background:var(--card,#fff);background-color:#fff;color:#202b24;border:1px solid #b9c6bd;border-radius:10px;z-index:110;box-shadow:0 7px 22px #0003}.ag-combo-item{display:block;width:100%;text-align:left;padding:11px 13px;border:0;border-bottom:1px solid #e9eee9;background:#fff;color:#1d3325;font:inherit;cursor:pointer;overflow-wrap:anywhere}.ag-combo-item:focus,.ag-combo-item:hover,.ag-combo-item.ag-active{background:#e8f3ec}.ag-combo-empty{padding:12px;color:#56625a}';
 document.head.appendChild(style);
 }
 for(const sel of [...document.querySelectorAll('select')]){
@@ -312,12 +312,14 @@ const field=document.createElement('input');
 field.type='text';field.className='ag-combo-input';field.autocomplete='off';
 field.setAttribute('role','combobox');field.setAttribute('aria-autocomplete','list');field.setAttribute('aria-expanded','false');
 const placeholder=options.find(o=>!o.value)?.text||'Selecciona una opción';
-field.placeholder='🔎 '+placeholder;field.setAttribute('aria-label','Buscar '+(sel.id||'opción'));
+field.placeholder=sel.id==='product'?'':'🔎 '+placeholder;field.setAttribute('aria-label','Buscar '+(sel.id||'opción'));
 const arrow=document.createElement('span');arrow.className='ag-combo-icon';arrow.textContent='⌄';
+const clear=document.createElement('button');clear.type='button';clear.className='ag-combo-clear';clear.textContent='×';clear.title='Borrar selección y búsqueda';clear.setAttribute('aria-label','Borrar selección y búsqueda');clear.hidden=true;
 const menu=document.createElement('div');menu.className='ag-combo-menu';menu.setAttribute('role','listbox');menu.hidden=true;
-wrap.append(field,arrow,menu);
+wrap.append(field,clear,arrow,menu);
 let current=sel.value,activeIndex=-1,visible=[];
 const selectedLabel=()=>options.find(o=>o.value===current)?.text||'';
+const updateClear=()=>{clear.hidden=!field.value;};
 const close=()=>{menu.hidden=true;field.setAttribute('aria-expanded','false');activeIndex=-1;};
 const draw=(query)=>{
 const normQuery=norm(query);
@@ -333,23 +335,25 @@ menu.appendChild(btn);
 activeIndex=-1;menu.hidden=false;field.setAttribute('aria-expanded','true');
 };
 const choose=(opt)=>{
-current=opt.value;sel.value=opt.value;field.value=opt.text;close();
+current=opt.value;sel.value=opt.value;field.value=opt.text;close();updateClear();
 sel.dispatchEvent(new Event('change',{bubbles:true}));
 };
 field.addEventListener('focus',()=>{field.select();draw('')});
-field.addEventListener('input',()=>draw(field.value));
+field.addEventListener('input',()=>{if(current){current='';sel.value='';sel.dispatchEvent(new Event('change',{bubbles:true}));}updateClear();draw(field.value)});
+clear.addEventListener('pointerdown',e=>e.preventDefault());
+clear.addEventListener('click',()=>{const hadValue=!!current;current='';sel.value='';field.value='';updateClear();if(hadValue)sel.dispatchEvent(new Event('change',{bubbles:true}));field.focus();draw('');});
 field.addEventListener('keydown',e=>{
-if(e.key==='Escape'){close();field.value=selectedLabel();field.blur();return;}
+if(e.key==='Escape'){close();field.value=selectedLabel();updateClear();field.blur();return;}
 if(e.key==='ArrowDown'||e.key==='ArrowUp'){
 e.preventDefault();if(menu.hidden)draw('');
 if(visible.length){activeIndex=e.key==='ArrowDown'?(activeIndex+1)%visible.length:(activeIndex+visible.length-1)%visible.length;[...menu.children].forEach((x,i)=>x.classList.toggle('ag-active',i===activeIndex));menu.children[activeIndex]?.scrollIntoView({block:'nearest'});}
 }
 if(e.key==='Enter'&&!menu.hidden){e.preventDefault();if(visible.length===1)choose(visible[0]);else if(activeIndex>=0)choose(visible[activeIndex]);}
 });
-field.addEventListener('blur',()=>{setTimeout(()=>{if(!wrap.contains(document.activeElement)){close();field.value=selectedLabel();}},120)});
-sel.addEventListener('change',()=>{current=sel.value;field.value=selectedLabel();});
-field.value=selectedLabel();
-document.addEventListener('pointerdown',e=>{if(!wrap.contains(e.target)){close();field.value=selectedLabel();}});
+field.addEventListener('blur',()=>{setTimeout(()=>{if(!wrap.contains(document.activeElement)){close();field.value=selectedLabel();updateClear();}},120)});
+sel.addEventListener('change',()=>{current=sel.value;field.value=selectedLabel();updateClear();});
+field.value=selectedLabel();updateClear();
+document.addEventListener('pointerdown',e=>{if(!wrap.contains(e.target)){close();field.value=selectedLabel();updateClear();}});
 }
 }
 function render(){let items=[['inicio','🏠 Inicio'],['clientes','👥 Clientes'],['movimientos','📦 Movimientos'],['planes','🌿 Abonado'],['visitas','📝 Visitas'],['pedidos','🛒 Pedidos'],['alertas','⏰ Alertas'],['comandos','🎙️ Entrada rápida'],['documentos','📷 Documentos'],['datos','⚙️ Datos y copias']];$('nav').innerHTML=items.map(([s,n])=>`<button class="${screen===s?'active':''}" data-nav="${s}">${n}</button>`).join('');$('app').innerHTML=({inicio:home,clientes:customersScreen,cliente:detail,movimientos:movementScreen,comandos:commandScreen,documentos:documentsScreen,planes:plansScreen,visitas:visitsScreen,pedidos:ordersScreen,alertas:alertsScreen,datos:dataScreen})[screen]();wire();installQuickSearch();}
