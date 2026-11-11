@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='42', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='43', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -368,13 +368,14 @@ function stockUnit(p){return seedStock(p)?'envases':itemStock(p)?'ud.':p?.unit||
 function fromStockBase(value,p){return discreteStock(p)?value:fromBase(value,p.unit);}
 function productMapping(p){if(!p)return null;return (model.productMappings||[]).filter(x=>x.productId===p.id).sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))||String(b.id).localeCompare(String(a.id)))[0]||null}
 function catalogFormat(p){if(!p)return '';const map=productMapping(p);if(map?.format)return map.format;const pack=commercialPack(p);return pack?.source||String(p.package||'').trim()||'Sin formato identificado'}
-function legalStatus(p){if(!p)return 'Sin información';const m=productMapping(p);const reg=String(m?.registration??p.registration??'').trim();if(reg&&m?.verified)return 'Registro MAPA verificado: '+reg;if(reg)return 'Nº MAPA '+reg+' (pendiente verificar)';if(m?.confirmedNoRegistration)return 'Sin registro fitosanitario (comprobado)';return 'Sin nº MAPA informado (pendiente verificar)'}
+function isLobelabMonitoring(p){return !!p&&['310003','310005'].includes(String(p.code||''))&&/LOBELAB/i.test(p.name||'')}
+function legalStatus(p){if(!p)return 'Sin información';if(isLobelabMonitoring(p))return 'Feromona de monitoreo · NO fitosanitario (confirmado por usuario)';const m=productMapping(p);const reg=String(m?.registration??p.registration??'').trim();if(reg&&m?.verified)return 'Registro MAPA verificado: '+reg;if(reg)return 'Nº MAPA '+reg+' (pendiente verificar)';if(m?.confirmedNoRegistration)return 'Sin registro fitosanitario (comprobado)';return 'Sin nº MAPA informado (pendiente verificar)'}
 function catalogFamilyGroups(){const map=new Map();for(const p of model.products){let k=stockGroupKey(p);if(!map.has(k))map.set(k,{name:stockDisplayName(p),unit:stockUnit(p),products:[]});map.get(k).products.push(p)}return [...map.values()].sort((a,b)=>a.name.localeCompare(b.name))}
 async function saveProductMapping(e){e.preventDefault();let f=new FormData(e.target),p=prod(f.get('productId')),name=String(f.get('familyName')||'').trim(),format=String(f.get('format')||'').trim(),registration=String(f.get('registration')||'').trim(),verified=f.get('verified')==='on',confirmedNoRegistration=f.get('confirmedNoRegistration')==='on';if(!p||!name||name.length>150||format.length>90)return t('Revisa nombre principal y formato','error');if(verified&&!registration)return t('Para marcar registrado hace falta un número MAPA','error');if(confirmedNoRegistration&&registration)return t('No se puede indicar registro y ausencia de registro a la vez','error');model.productMappings.push({id:id(),productId:p.id,familyName:name,format,registration,verified,confirmedNoRegistration,at:stamp(),technician:model.tech});await save();productEditId='';render();t('Ficha comercial guardada')}
 function productEditor(){const p=prod(productEditId);if(!p)return '';const m=productMapping(p)||{};return `<div class="card" style="margin-top:12px"><h3>Editar producto y presentación</h3><p class="muted small">Código: ${esc(p.code||'Manual')} · Original: ${esc(p.name)}</p><form id="editProductMapping" class="stack"><input type="hidden" name="productId" value="${esc(p.id)}">${input('Producto principal (sin formato) *','familyName','text',m.familyName||stockDisplayName(p),'required maxlength="150"')}${input('Presentación comercial','format','text',m.format||catalogFormat(p),'maxlength="90"')}${input('Número de registro MAPA (si consta)','registration','text',m.registration??p.registration??'','maxlength="40"')}<label><input type="checkbox" name="verified" ${m.verified?'checked':''}> Registro comprobado en fuente oficial MAPA</label><label><input type="checkbox" name="confirmedNoRegistration" ${m.confirmedNoRegistration?'checked':''}> Comprobado que no tiene registro fitosanitario</label><div class="actions"><button class="btn" type="submit">Guardar ficha</button><button class="btn alt" type="button" id="cancelProductEdit">Cancelar</button></div></form><div class="notice">La clasificación legal y la unidad de inventario son independientes. Los registros no verificados quedan marcados como pendientes.</div></div>`}
 function stockProductName(p){
  if(!p)return '';
- const map=productMapping(p);if(map?.familyName)return map.familyName;
+ const map=productMapping(p);if(map?.familyName)return map.familyName;if(isLobelabMonitoring(p))return 'LOBELAB';
  if(discreteStock(p))return p.name;
  let name=String(p.name||'').trim();
  name=name.replace(/\s*(?:\/|[-,])\s*\d+(?:[.,]\d+)?\s*(?:kg|kgs?|g|grs?\.?|gramos?|l|lts?\.?|litros?|ml|cm3|cm³|cc|uds?\.?|unidades?)\s*$/i,'');
@@ -382,6 +383,7 @@ function stockProductName(p){
  return name.trim()||p.name;
 }
 function stockDisplayName(p){
+if(isLobelabMonitoring(p))return 'LOBELAB';
 const name=stockProductName(p);
 if(p&&!discreteStock(p)&&/^profiler(?:\s+wg)?$/i.test(name.trim()))return 'PROFILER';
 return name;
