@@ -32,12 +32,22 @@ function driveStatusHTML(){
 const connected=driveIsConnected();
 const expired=!!driveAccessToken&&Date.now()>=driveTokenExpires-60000;
 const state=connected?'🟢 Conectado a Google Drive':expired?'🟠 Sesión caducada; vuelve a conectar':drivePreferred?'🟡 Cuenta recordada; necesita autorización':'⚪ Sin conectar';
-return `<div class="half card"><h2>☁️ Google Drive — conexión y sincronización</h2><p class="muted">Acceso limitado a la carpeta propia de AgroStock (drive.appdata).</p><div class="notice"><strong>Estado:</strong> ${esc(state)}<br>${esc(driveStatus)}<br><strong>Sincronización:</strong> ${autoSyncEnabled?'automática activada mientras Drive permanezca autorizado.':'manual (puedes activar la automática abajo).'}</div><div class="actions">${connected?'<button class="btn alt" id="driveDisconnect">Desconectar Google Drive</button>':'<button class="btn" id="driveConnect">Conectar Google Drive</button>'}</div><p class="small muted">${drivePreferred?'Se recuerda que quieres conectar esta cuenta en este dispositivo.':'La autorización puede recordarse como preferencia en este dispositivo.'} Los tokens de acceso se mantienen solo mientras esta sesión esté activa y caducan; por seguridad, en esta versión puede ser necesario pulsar «Conectar» después de cerrar la app. No se guardan contraseñas ni tokens en la base local.</p></div>`}
+return `<div class="half card"><h2>☁️ Google Drive — conexión y sincronización</h2><p class="muted">Acceso limitado a la carpeta propia de AgroStock (drive.appdata).</p><div class="notice"><strong>Estado:</strong> ${esc(state)}<br>${esc(driveStatus)}<br><strong>Sincronización:</strong> ${autoSyncEnabled?'automática activada mientras Drive permanezca autorizado.':'manual (puedes activar la automática abajo).'}<br><strong>${esc(syncUiStatus())}</strong></div><div class="actions">${connected?'<button class="btn alt" id="driveDisconnect">Desconectar Google Drive</button>':'<button class="btn" id="driveConnect">Conectar Google Drive</button>'}</div><p class="small muted">${drivePreferred?'Se recuerda que quieres conectar esta cuenta en este dispositivo.':'La autorización puede recordarse como preferencia en este dispositivo.'} Los tokens de acceso se mantienen solo mientras esta sesión esté activa y caducan; por seguridad, en esta versión puede ser necesario pulsar «Conectar» después de cerrar la app. No se guardan contraseñas ni tokens en la base local.</p></div>`}
 function loadGoogleIdentity(){return new Promise((res,rej)=>{if(window.google?.accounts?.oauth2)return res();if(document.getElementById('google-identity-script')){return rej(Error('Google Identity Services aún se está cargando; inténtalo de nuevo'))}let sc=document.createElement('script');sc.id='google-identity-script';sc.src='https://accounts.google.com/gsi/client';sc.async=true;sc.onload=res;sc.onerror=()=>rej(Error('No se pudo cargar Google Identity Services. Comprueba la conexión'));document.head.append(sc)})}
 async function driveConnect(){if(!navigator.onLine)return t('Para conectar Google Drive necesitas internet','error');driveStatus='Preparando autorización…';render();try{if(!window.google?.accounts?.oauth2)throw Error('El servicio de Google aún no está cargado; espera unos segundos y vuelve a pulsar');driveTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_OAUTH_CLIENT_ID,scope:'https://www.googleapis.com/auth/drive.appdata',callback:async r=>{if(r.error){driveStatus='Error de autorización: '+r.error;render();return}driveAccessToken=r.access_token;driveTokenExpires=Date.now()+(Number(r.expires_in)||3600)*1000;driveStatus='Autorizado; comprobando acceso a appDataFolder…';render();try{let response=await fetch('https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=nextPageToken,files(id,name)&page_size=10',{headers:{Authorization:'Bearer '+driveAccessToken}});if(!response.ok)throw Error('Drive API HTTP '+response.status);let data=await response.json();driveStatus='Conexión comprobada. Archivos propios visibles: '+(data.files?.length||0)+'.';if(autoSyncEnabled)syncAutoSchedule(1200);drivePreferred=true;try{localStorage.setItem(DRIVE_PREF_KEY,'1')}catch(e){}}catch(e){driveStatus='Autorización concedida, pero fallo de API: '+e.message}render()}});driveTokenClient.requestAccessToken({prompt:'consent'})}catch(e){driveStatus='No conectado: '+e.message;render()}}
 
 const SYNC_NAME='agrostock-sync-v1.json',SYNC_KEYS=['customers','products','movements','documents','plans','visits','orders','alerts','clientStatuses'];
 let syncBusy=false,syncMessage='Todavía no se ha sincronizado en esta sesión.',autoSyncTimer=null,autoSyncPending=false,autoSyncLastSuccess='';
+const SYNC_DIRTY_KEY='agrostock-pending-upload-v1';
+let syncDirty=false;
+try{syncDirty=localStorage.getItem(SYNC_DIRTY_KEY)==='1'}catch(e){}
+function markSyncDirty(v){syncDirty=!!v;try{localStorage.setItem(SYNC_DIRTY_KEY,syncDirty?'1':'0')}catch(e){}}
+function syncUiStatus(){
+if(syncDirty)return '🟠 Cambios guardados en este dispositivo; pendientes de sincronizar con Google Drive.';
+if(!driveIsConnected())return '🟡 Drive sin autorización activa; los datos locales están conservados.';
+return autoSyncLastSuccess?'🟢 Última comprobación con Drive: '+autoSyncLastSuccess:'🔵 Conectado; pendiente de la primera comprobación.';
+}
+
 let autoSyncPoll=null;
 function autoSyncHeartbeat(){if(!autoSyncEnabled||document.hidden||!navigator.onLine||!driveIsConnected()||syncBusy)return;syncAutoSchedule(1200);}
 autoSyncPoll=setInterval(autoSyncHeartbeat,60000);
@@ -45,13 +55,14 @@ const AUTO_SYNC_KEY='agrostock-auto-sync-v1';
 let autoSyncEnabled=false;
 try{autoSyncEnabled=localStorage.getItem(AUTO_SYNC_KEY)==='1'}catch(e){}
 function syncAutoSchedule(delay=2800){
-if(!autoSyncEnabled||!driveIsConnected()||!navigator.onLine)return;
+if(!autoSyncEnabled||!navigator.onLine)return;
+if(!driveIsConnected()){if(drivePreferred)driveStatus='Se necesita conectar Google Drive para enviar cambios pendientes';return;}
 autoSyncPending=true;
 clearTimeout(autoSyncTimer);
 autoSyncTimer=setTimeout(async()=>{
 if(!autoSyncEnabled||!driveIsConnected()||!navigator.onLine){autoSyncPending=false;return;}
 if(syncBusy){syncAutoSchedule(4500);return;}
-if(document.activeElement&&['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)){syncAutoSchedule(12000);return;}
+if(document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName)&&document.activeElement.value){syncAutoSchedule(12000);return;}
 autoSyncPending=false;await syncNow(true);
 },delay);
 }
@@ -61,7 +72,7 @@ try{localStorage.setItem(AUTO_SYNC_KEY,checked?'1':'0')}catch(e){}
 if(checked)syncAutoSchedule(800);else{clearTimeout(autoSyncTimer);autoSyncPending=false;}
 render();
 }
-function syncPanel(){return '<div class="full card"><h2>🔄 Sincronización con Google Drive</h2><p>Une los registros de móvil y tablet sin duplicar identificadores. Comienza por el móvil, después sincroniza la tablet.</p><div class="notice">'+esc(syncMessage)+(autoSyncLastSuccess?'<br><b>Última sincronización de esta sesión:</b> '+esc(autoSyncLastSuccess):'')+'</div><div class="actions"><button class="btn" id="syncNow" '+(!driveIsConnected()||syncBusy?'disabled':'')+'>'+(syncBusy?'Sincronizando…':'🔄 Sincronizar ahora')+'</button><button class="btn alt" id="syncBackup">⬇ Copia de seguridad</button></div><label class="field" style="display:flex;align-items:center;gap:10px;margin:12px 0"><input type="checkbox" id="autoSyncToggle" '+(autoSyncEnabled?'checked':'')+'><span><b>Sincronización automática (pruebas)</b><br><small>Tras conectar Drive, al guardar cambios y al recuperar la conexión.</small></span></label><p class="small muted">Requiere internet y conexión autorizada. Experimental: mantén la misma cuenta en ambos dispositivos. No edites el mismo registro simultáneamente. Si hay versiones diferentes de un registro, se detiene sin sobrescribirlo. No desinstales la aplicación sin hacer una copia.</p></div>'}
+function syncPanel(){return '<div class="full card"><h2>🔄 Sincronización con Google Drive</h2><p>Une los registros de móvil y tablet sin duplicar identificadores. Comienza por el móvil, después sincroniza la tablet.</p><div class="notice"><b>'+esc(syncUiStatus())+'</b><br>'+esc(syncMessage)+(autoSyncLastSuccess?'<br><b>Última sincronización de esta sesión:</b> '+esc(autoSyncLastSuccess):'')+'</div><div class="actions"><button class="btn" id="syncNow" '+(!driveIsConnected()||syncBusy?'disabled':'')+'>'+(syncBusy?'Sincronizando…':'🔄 Sincronizar ahora')+'</button><button class="btn alt" id="syncBackup">⬇ Copia de seguridad</button></div><label class="field" style="display:flex;align-items:center;gap:10px;margin:12px 0"><input type="checkbox" id="autoSyncToggle" '+(autoSyncEnabled?'checked':'')+'><span><b>Sincronización automática (pruebas)</b><br><small>Tras conectar Drive, al guardar cambios y al recuperar la conexión.</small></span></label><p class="small muted">Requiere internet y conexión autorizada. Experimental: mantén la misma cuenta en ambos dispositivos. No edites el mismo registro simultáneamente. Si hay versiones diferentes de un registro, se detiene sin sobrescribirlo. No desinstales la aplicación sin hacer una copia.</p></div>'}
 
 function emptyTestDataset(){const next={...model,version:VERSION,syncEpoch:Math.max(Date.now(),Number(model.syncEpoch)||0)+1,updated:stamp()};for(const key of SYNC_KEYS)next[key]=[];return next;}
 async function clearTestDataset(){
@@ -134,6 +145,7 @@ await driveRequest('https://www.googleapis.com/upload/drive/v3/files?uploadType=
 async function syncNow(automatic=false){
 if(syncBusy)return;
 if(!navigator.onLine||!driveIsConnected())return t('Conecta Google Drive con internet antes de sincronizar','error');
+let changedDeviceDuringSync=false;
 syncBusy=true;syncMessage='Consultando registros en Drive…';if(!automatic)render();
 try{
 const files=await driveFiles();if(files.length>1)throw Error('Existen varias copias principales; hay que revisarlas antes de continuar.');
@@ -163,13 +175,14 @@ const latest=await driveFiles();
 if(latest.length!==files.length||(files.length&&latest[0].version!==files[0].version))throw Error('Drive se modificó durante la sincronización; repite la operación.');
 await drivePut(SYNC_NAME,{...merged,version:VERSION,updated:stamp()},files[0]?.id);
 }
-if(changedHere){model=merged;await save();}
+if(changedHere){model=merged;changedDeviceDuringSync=true;await save();}
 }
 syncMessage='Sincronización completada: '+total+' registros. '+(changedHere?'Datos añadidos al dispositivo. ':'')+(changedThere?'Drive actualizado.':'Drive ya estaba al día.');
 autoSyncLastSuccess=new Date().toLocaleString('es-ES');
+markSyncDirty(false);
 t('Sincronización completada');
-}catch(e){syncMessage='No se completó: '+e.message;t(syncMessage,'error');console.error(e)}
-finally{syncBusy=false;if(!automatic||screen==='datos')render();if(autoSyncPending)syncAutoSchedule(4500);}
+}catch(e){syncMessage='No se completó: '+e.message;if(!automatic)t(syncMessage,'error');console.error(e)}
+finally{syncBusy=false;if(!automatic||screen==='datos'||(automatic&&changedDeviceDuringSync&&['inicio','clientes','cliente'].includes(screen)))render();if(autoSyncPending)syncAutoSchedule(4500);}
 }
 let silentReconnectAttempted=false;
 async function trySilentReconnect(){
@@ -206,7 +219,7 @@ function t(s,kind=''){let e=$('toast');e.textContent=s;e.className='toast '+kind
 function openDB(){return new Promise((res,rej)=>{let r=indexedDB.open(DBNAME,1);r.onupgradeneeded=()=>{r.result.createObjectStore(STORE)};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 function dbGet(){return new Promise((res,rej)=>{let tr=db.transaction(STORE,'readonly');let r=tr.objectStore(STORE).get('main');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 function dbPut(){model.updated=stamp();return new Promise((res,rej)=>{let tr=db.transaction(STORE,'readwrite');tr.objectStore(STORE).put(model,'main');tr.oncomplete=res;tr.onerror=()=>rej(tr.error)})}
-async function save(){try{await dbPut();if(!syncBusy)syncAutoSchedule();}catch(e){console.error(e);alert('No se pudo guardar. Comprueba el espacio disponible y descarga una copia de seguridad.');throw e}}
+async function save(){try{await dbPut();if(!syncBusy){markSyncDirty(true);syncAutoSchedule();}}catch(e){console.error(e);alert('No se pudo guardar. Comprueba el espacio disponible y descarga una copia de seguridad.');throw e}}
 function download(text,filename,type='application/json'){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([text],{type}));a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
 function backup(){download(JSON.stringify(model),`AgroStock_respaldo_${today()}.json`);t('Copia de seguridad descargada')}
 function ensure(x){if(!x||!Array.isArray(x.customers)||!Array.isArray(x.products)||!Array.isArray(x.movements)||!Array.isArray(x.documents))throw Error('Archivo de datos no válido');if(!Array.isArray(x.plans))x.plans=[];if(!Array.isArray(x.visits))x.visits=[];if(!Array.isArray(x.orders))x.orders=[];if(!Array.isArray(x.alerts))x.alerts=[];if(!Array.isArray(x.clientStatuses))x.clientStatuses=[];for(let p of x.products)if(!p.category)p.category='fitosanitario';}
