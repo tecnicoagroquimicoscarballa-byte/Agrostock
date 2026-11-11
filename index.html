@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='38', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='39', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],updated:''};
@@ -349,10 +349,14 @@ function stockProductName(p){
  name=name.replace(/\s+\d+(?:[.,]\d+)?\s*(?:kg|kgs?|g|grs?\.?|gramos?|l|lts?\.?|litros?|ml|cm3|cm³|cc)\s*$/i,'');
  return name.trim()||p.name;
 }
-function stockDisplayName(p){const name=stockProductName(p);return norm(name)==='profiler wg'?'PROFILER':name;}
+function stockDisplayName(p){
+const name=stockProductName(p);
+if(p&&!discreteStock(p)&&p.category==='fitosanitario'&&/^profiler(?:\s+wg)?$/i.test(name.trim()))return 'PROFILER';
+return name;
+}
 function stockGroupKey(p){
  if(!p)return '';
- return discreteStock(p)?'individual:'+p.id:'contenido:'+norm(stockProductName(p))+'|'+baseUnit(p.unit)+'|'+String(p.category||'');
+ return discreteStock(p)?'individual:'+p.id:'contenido:'+norm(stockDisplayName(p))+'|'+baseUnit(p.unit)+'|'+String(p.category||'');
 }
 function groupProductsFor(cid){
  const grouped=new Map();
