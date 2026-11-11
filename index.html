@@ -62,7 +62,7 @@ clearTimeout(autoSyncTimer);
 autoSyncTimer=setTimeout(async()=>{
 if(!autoSyncEnabled||!driveIsConnected()||!navigator.onLine){autoSyncPending=false;return;}
 if(syncBusy){syncAutoSchedule(4500);return;}
-if(document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName)&&document.activeElement.value){syncAutoSchedule(12000);return;}
+// Sincronizar aunque el foco permanezca en un campo después de guardar.
 autoSyncPending=false;await syncNow(true);
 },delay);
 }
@@ -181,7 +181,7 @@ syncMessage='Sincronización completada: '+total+' registros. '+(changedHere?'Da
 autoSyncLastSuccess=new Date().toLocaleString('es-ES');
 markSyncDirty(false);
 t('Sincronización completada');
-}catch(e){syncMessage='No se completó: '+e.message;if(!automatic)t(syncMessage,'error');console.error(e)}
+}catch(e){syncMessage='No se completó: '+e.message;t(automatic?'Sincronización pendiente: revisa Drive en Datos y copias':syncMessage,'error');console.error(e)}
 finally{syncBusy=false;if(!automatic||screen==='datos'||(automatic&&changedDeviceDuringSync&&['inicio','clientes','cliente'].includes(screen)))render();if(autoSyncPending)syncAutoSchedule(4500);}
 }
 let silentReconnectAttempted=false;
