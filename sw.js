@@ -1,4 +1,4 @@
-const CACHE='agrostock-v3-53-selective-isonet-clean-20261111';
+const CACHE='agrostock-v3-54-no-isonet-clean-20261111';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icons/icon.svg'];
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
