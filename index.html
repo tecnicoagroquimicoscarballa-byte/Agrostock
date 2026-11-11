@@ -18,10 +18,10 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='41', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='42', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
-let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],updated:''};
+let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
 let screen='inicio',selected='',customerTab='stock',filter='',db=null, pendingAction=null, voiceOn=false;
 // Autorización Google Drive de prueba: token exclusivamente en memoria, nunca en IndexedDB o exportaciones.
 let driveTokenClient=null, driveAccessToken=null, driveTokenExpires=0, driveStatus='No conectado';
@@ -47,7 +47,7 @@ return `<div class="half card"><h2>☁️ Google Drive — conexión y sincroniz
 function loadGoogleIdentity(){return new Promise((res,rej)=>{if(window.google?.accounts?.oauth2)return res();if(document.getElementById('google-identity-script')){return rej(Error('Google Identity Services aún se está cargando; inténtalo de nuevo'))}let sc=document.createElement('script');sc.id='google-identity-script';sc.src='https://accounts.google.com/gsi/client';sc.async=true;sc.onload=res;sc.onerror=()=>rej(Error('No se pudo cargar Google Identity Services. Comprueba la conexión'));document.head.append(sc)})}
 async function driveConnect(){if(!navigator.onLine)return t('Para conectar Google Drive necesitas internet','error');driveStatus='Preparando autorización…';render();try{if(!window.google?.accounts?.oauth2)throw Error('El servicio de Google aún no está cargado; espera unos segundos y vuelve a pulsar');driveTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_OAUTH_CLIENT_ID,scope:'https://www.googleapis.com/auth/drive.appdata',...(driveLoginHint?{login_hint:driveLoginHint}:{}),callback:async r=>{if(r.error){driveStatus='Error de autorización: '+r.error;render();return}driveAccessToken=r.access_token;driveTokenExpires=Date.now()+(Number(r.expires_in)||3600)*1000;driveStatus='Autorizado; comprobando acceso a appDataFolder…';render();try{let response=await fetch('https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=nextPageToken,files(id,name)&page_size=10',{headers:{Authorization:'Bearer '+driveAccessToken}});if(!response.ok)throw Error('Drive API HTTP '+response.status);let data=await response.json();driveStatus='Conexión comprobada. Archivos propios visibles: '+(data.files?.length||0)+'.';if(autoSyncEnabled)syncAutoSchedule(1200);drivePreferred=true;try{localStorage.setItem(DRIVE_PREF_KEY,'1')}catch(e){}}catch(e){driveStatus='Autorización concedida, pero fallo de API: '+e.message}render()}});driveTokenClient.requestAccessToken({prompt:'',...(driveLoginHint?{login_hint:driveLoginHint}:{})})}catch(e){driveStatus='No conectado: '+e.message;render()}}
 
-const SYNC_NAME='agrostock-sync-v1.json',SYNC_KEYS=['customers','products','movements','documents','plans','visits','orders','alerts','clientStatuses','productStatuses','productSelections','customerDirectory'];
+const SYNC_NAME='agrostock-sync-v1.json',SYNC_KEYS=['customers','products','movements','documents','plans','visits','orders','alerts','clientStatuses','productStatuses','productSelections','customerDirectory','productMappings'];
 let syncBusy=false,syncMessage='Todavía no se ha sincronizado en esta sesión.',autoSyncTimer=null,autoSyncPending=false,autoSyncLastSuccess='';
 const SYNC_DIRTY_KEY='agrostock-pending-upload-v1';
 let syncDirty=false;
@@ -255,7 +255,7 @@ function dbPut(){model.updated=stamp();return new Promise((res,rej)=>{let tr=db.
 async function save(){try{if(!syncBusy){if(!Array.isArray(model.pendingChanges))model.pendingChanges=[];model.pendingChanges.push({id:id(),at:stamp()});if(model.pendingChanges.length>200)model.pendingChanges=model.pendingChanges.slice(-200);}await dbPut();if(!syncBusy){markSyncDirty(true);syncAutoSchedule();}}catch(e){console.error(e);alert('No se pudo guardar. Comprueba el espacio disponible y descarga una copia de seguridad.');throw e}}
 function download(text,filename,type='application/json'){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([text],{type}));a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000)}
 function backup(){download(JSON.stringify(model),`AgroStock_respaldo_${today()}.json`);t('Copia de seguridad descargada')}
-function ensure(x){if(!x||!Array.isArray(x.customers)||!Array.isArray(x.products)||!Array.isArray(x.movements)||!Array.isArray(x.documents))throw Error('Archivo de datos no válido');if(!Array.isArray(x.plans))x.plans=[];if(!Array.isArray(x.visits))x.visits=[];if(!Array.isArray(x.orders))x.orders=[];if(!Array.isArray(x.alerts))x.alerts=[];if(!Array.isArray(x.clientStatuses))x.clientStatuses=[];if(!Array.isArray(x.productStatuses))x.productStatuses=[];if(!Array.isArray(x.productSelections))x.productSelections=[];if(!Array.isArray(x.customerDirectory))x.customerDirectory=[];if(!Array.isArray(x.pendingChanges))x.pendingChanges=[];for(let p of x.products)if(!p.category)p.category='fitosanitario';}
+function ensure(x){if(!x||!Array.isArray(x.customers)||!Array.isArray(x.products)||!Array.isArray(x.movements)||!Array.isArray(x.documents))throw Error('Archivo de datos no válido');if(!Array.isArray(x.plans))x.plans=[];if(!Array.isArray(x.visits))x.visits=[];if(!Array.isArray(x.orders))x.orders=[];if(!Array.isArray(x.alerts))x.alerts=[];if(!Array.isArray(x.clientStatuses))x.clientStatuses=[];if(!Array.isArray(x.productStatuses))x.productStatuses=[];if(!Array.isArray(x.productSelections))x.productSelections=[];if(!Array.isArray(x.customerDirectory))x.customerDirectory=[];if(!Array.isArray(x.productMappings))x.productMappings=[];if(!Array.isArray(x.pendingChanges))x.pendingChanges=[];for(let p of x.products)if(!p.category)p.category='fitosanitario';}
 let showArchivedCustomers=false;
 function latestClientStatus(cid,data=model){
 const states=(data.clientStatuses||[]).filter(x=>x.customerId===cid).sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))||String(b.id).localeCompare(String(a.id)));
@@ -272,7 +272,7 @@ model.clientStatuses.push({id:id(),customerId:cid,status:archived?'baja':'activo
 await save();showArchivedCustomers=archived;selected='';navigate('clientes');t(archived?'Cliente dado de baja; historial conservado':'Cliente reactivado');
 }
 function cust(id){return model.customers.find(x=>x.id===id)}
-let productFilter='',myProductFilter='',productCatalogTab='referencia',customerDirectoryFilter='';
+let productFilter='',myProductFilter='',productCatalogTab='referencia',customerDirectoryFilter='',productEditId='';
 function productActivated(pid,data=model){
 const statuses=(data.productSelections||[]).filter(x=>x.productId===pid).sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))||String(b.id).localeCompare(String(a.id)));
 if(statuses.length)return statuses[0].status==='incorporado';
@@ -363,8 +363,15 @@ return /\b(traje|trajes|mono|monos|buzo|buzos|overol|overoles|base engomada|base
 function discreteStock(p){return seedStock(p)||itemStock(p);}
 function stockUnit(p){return seedStock(p)?'envases':itemStock(p)?'ud.':p?.unit||'ud.';}
 function fromStockBase(value,p){return discreteStock(p)?value:fromBase(value,p.unit);}
+function productMapping(p){if(!p)return null;return (model.productMappings||[]).filter(x=>x.productId===p.id).sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))||String(b.id).localeCompare(String(a.id)))[0]||null}
+function catalogFormat(p){if(!p)return '';const map=productMapping(p);if(map?.format)return map.format;const pack=commercialPack(p);return pack?.source||String(p.package||'').trim()||'Sin formato identificado'}
+function legalStatus(p){if(!p)return 'Sin información';const m=productMapping(p);const reg=String(m?.registration??p.registration??'').trim();if(reg&&m?.verified)return 'Registro MAPA verificado: '+reg;if(reg)return 'Nº MAPA '+reg+' (pendiente verificar)';if(m?.confirmedNoRegistration)return 'Sin registro fitosanitario (comprobado)';return 'Sin nº MAPA informado (pendiente verificar)'}
+function catalogFamilyGroups(){const map=new Map();for(const p of model.products){let k=stockGroupKey(p);if(!map.has(k))map.set(k,{name:stockDisplayName(p),unit:stockUnit(p),products:[]});map.get(k).products.push(p)}return [...map.values()].sort((a,b)=>a.name.localeCompare(b.name))}
+async function saveProductMapping(e){e.preventDefault();let f=new FormData(e.target),p=prod(f.get('productId')),name=String(f.get('familyName')||'').trim(),format=String(f.get('format')||'').trim(),registration=String(f.get('registration')||'').trim(),verified=f.get('verified')==='on',confirmedNoRegistration=f.get('confirmedNoRegistration')==='on';if(!p||!name||name.length>150||format.length>90)return t('Revisa nombre principal y formato','error');if(verified&&!registration)return t('Para marcar registrado hace falta un número MAPA','error');if(confirmedNoRegistration&&registration)return t('No se puede indicar registro y ausencia de registro a la vez','error');model.productMappings.push({id:id(),productId:p.id,familyName:name,format,registration,verified,confirmedNoRegistration,at:stamp(),technician:model.tech});await save();productEditId='';render();t('Ficha comercial guardada')}
+function productEditor(){const p=prod(productEditId);if(!p)return '';const m=productMapping(p)||{};return `<div class="card" style="margin-top:12px"><h3>Editar producto y presentación</h3><p class="muted small">Código: ${esc(p.code||'Manual')} · Original: ${esc(p.name)}</p><form id="editProductMapping" class="stack"><input type="hidden" name="productId" value="${esc(p.id)}">${input('Producto principal (sin formato) *','familyName','text',m.familyName||stockDisplayName(p),'required maxlength="150"')}${input('Presentación comercial','format','text',m.format||catalogFormat(p),'maxlength="90"')}${input('Número de registro MAPA (si consta)','registration','text',m.registration??p.registration??'','maxlength="40"')}<label><input type="checkbox" name="verified" ${m.verified?'checked':''}> Registro comprobado en fuente oficial MAPA</label><label><input type="checkbox" name="confirmedNoRegistration" ${m.confirmedNoRegistration?'checked':''}> Comprobado que no tiene registro fitosanitario</label><div class="actions"><button class="btn" type="submit">Guardar ficha</button><button class="btn alt" type="button" id="cancelProductEdit">Cancelar</button></div></form><div class="notice">La clasificación legal y la unidad de inventario son independientes. Los registros no verificados quedan marcados como pendientes.</div></div>`}
 function stockProductName(p){
  if(!p)return '';
+ const map=productMapping(p);if(map?.familyName)return map.familyName;
  if(discreteStock(p))return p.name;
  let name=String(p.name||'').trim();
  name=name.replace(/\s*(?:\/|[-,])\s*\d+(?:[.,]\d+)?\s*(?:kg|kgs?|g|grs?\.?|gramos?|l|lts?\.?|litros?|ml|cm3|cm³|cc|uds?\.?|unidades?)\s*$/i,'');
@@ -373,12 +380,12 @@ function stockProductName(p){
 }
 function stockDisplayName(p){
 const name=stockProductName(p);
-if(p&&!discreteStock(p)&&p.category==='fitosanitario'&&/^profiler(?:\s+wg)?$/i.test(name.trim()))return 'PROFILER';
+if(p&&!discreteStock(p)&&/^profiler(?:\s+wg)?$/i.test(name.trim()))return 'PROFILER';
 return name;
 }
 function stockGroupKey(p){
  if(!p)return '';
- return discreteStock(p)?'individual:'+p.id:'contenido:'+norm(stockDisplayName(p))+'|'+baseUnit(p.unit)+'|'+String(p.category||'');
+ return discreteStock(p)?'individual:'+p.id:'contenido:'+norm(stockDisplayName(p))+'|'+baseUnit(p.unit);
 }
 function groupProductsFor(cid){
  const grouped=new Map();
@@ -532,7 +539,7 @@ for(const item of parsed.products){
 if(!item||typeof item.name!=='string'||!item.name.trim()||typeof item.code!=='string'||!item.code.trim()||!allowedUnit.has(item.unit)||!allowedCategory.has(item.category)){invalid++;continue;}
 const key='carballa-'+item.code.trim();
 if(ids.has(key)||codes.has(item.code.trim())||names.has(norm(item.name))){ignored++;continue;}
-const p={id:key,code:item.code.trim(),name:item.name.trim(),unit:item.unit,category:item.category,registration:item.category==='fitosanitario'?String(item.registration||'').trim():'',registrationSource:item.registrationSource||'Listado Carballa (pendiente comprobación oficial)',origin:'catalogo_carballa',package:item.package||'',sourceType:item.sourceType||'',categoryPendingReview:!!item.categoryPendingReview,created:stamp()};
+const p={id:key,code:item.code.trim(),name:item.name.trim(),unit:item.unit,category:item.category,registration:String(item.registration||'').trim(),registrationSource:item.registrationSource||'Listado Carballa (pendiente comprobación oficial)',origin:'catalogo_carballa',package:item.package||'',sourceType:item.sourceType||'',categoryPendingReview:!!item.categoryPendingReview,created:stamp()};
 add.push(p);ids.add(key);codes.add(p.code);names.add(norm(p.name));if(p.categoryPendingReview)pending++;
 }
 if(!add.length)return t('No hay productos nuevos que importar ('+ignored+' ya existentes).');
@@ -540,10 +547,11 @@ if(!confirm('Se añadirán '+add.length+' productos del catálogo Carballa.\n\n'
 model.products.push(...add);await save();render();t('Catálogo importado: '+add.length+' productos nuevos');
 alert('Importación terminada.\nProductos añadidos: '+add.length+'\nCoincidencias omitidas: '+ignored+'\nRegistros no válidos: '+invalid+'\n\nComprueba que Google Drive sincronice antes de trabajar en la tablet.');
 }
-async function submitProduct(e){e.preventDefault();let f=new FormData(e.target),name=f.get('name').trim(),unit=f.get('unit');if(model.products.some(p=>p.name.toLowerCase()===name.toLowerCase()))return t('Ya existe ese producto. Utiliza el mismo catálogo.','error');model.products.push({id:id(),name,unit,category:f.get('category')||'fitosanitario',registration:f.get('category')==='fitosanitario'?String(f.get('registration')||'').trim():'',registrationSource:'Introducido manualmente (no verificado)',origin:'manual',created:stamp()});await save();render();t('Producto añadido')}
+async function submitProduct(e){e.preventDefault();let f=new FormData(e.target),name=f.get('name').trim(),unit=f.get('unit');if(model.products.some(p=>p.name.toLowerCase()===name.toLowerCase()))return t('Ya existe ese producto. Utiliza el mismo catálogo.','error');model.products.push({id:id(),name,unit,category:f.get('category')||'fitosanitario',registration:String(f.get('registration')||'').trim(),registrationSource:'Introducido manualmente (no verificado)',origin:'manual',created:stamp()});await save();render();t('Producto añadido')}
 
 function commercialPack(p){
 if(!p)return null;
+const mapped=productMapping(p);if(mapped?.format){const mm=mapped.format.match(/(\d+(?:[.,]\d+)?)\s*(kg|g|gr|l|litros?|ml|cm³|cm3|ud\.?|unidades?)/i);if(mm){const u=/^kg$/i.test(mm[2])?'kg':/^(g|gr)$/i.test(mm[2])?'g':/^l/i.test(mm[2])?'L':/^ml$/i.test(mm[2])?'cm³':/^cm/i.test(mm[2])?'cm³':'ud.';if(baseUnit(u)===baseUnit(p.unit))return {size:fromBase(toBase(Number(mm[1].replace(',','.')),u),p.unit),unit:p.unit,source:mm[0]};}}
 const normText=x=>String(x||'').toUpperCase().replace(/,/g,'.').replace(/\s+/g,' ').trim();
 const text=normText(p.package),name=normText(p.name);
 const parseSize=(source)=>{
