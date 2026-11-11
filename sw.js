@@ -1,4 +1,4 @@
-const CACHE='agrostock-v3-13-network-first-20261110';
+const CACHE='agrostock-v3-14-auto-sync-optin-20261111';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icons/icon.svg'];
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
