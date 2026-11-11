@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='51', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='52', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -398,7 +398,7 @@ async function saveProductMapping(e){e.preventDefault();let f=new FormData(e.tar
 function productEditor(){const p=prod(productEditId);if(!p)return '';const m=productMapping(p)||{};return `<div class="card" style="margin-top:12px"><h3>Editar producto y presentación</h3><p class="muted small">Código: ${esc(p.code||'Manual')} · Original: ${esc(p.name)}</p><form id="editProductMapping" class="stack"><input type="hidden" name="productId" value="${esc(p.id)}">${input('Producto principal (sin formato) *','familyName','text',m.familyName||stockDisplayName(p),'required maxlength="150"')}${input('Presentación comercial','format','text',m.format||catalogFormat(p),'maxlength="90"')}${input('Número de registro MAPA (si consta)','registration','text',m.registration??p.registration??'','maxlength="40"')}<label><input type="checkbox" name="verified" ${m.verified?'checked':''}> Registro comprobado en fuente oficial MAPA</label><label><input type="checkbox" name="confirmedNoRegistration" ${m.confirmedNoRegistration?'checked':''}> Comprobado que no tiene registro fitosanitario</label><div class="actions"><button class="btn" type="submit">Guardar ficha</button><button class="btn alt" type="button" id="cancelProductEdit">Cancelar</button></div></form><div class="notice">La clasificación legal y la unidad de inventario son independientes. Los registros no verificados quedan marcados como pendientes.</div></div>`}
 function stockProductName(p){
  if(!p)return '';
- const map=productMapping(p);if(map?.familyName)return map.familyName;if(p.familyName)return p.familyName;if(isLobelabMonitoring(p))return 'LOBELAB';
+ const map=productMapping(p);if(map?.familyName)return map.familyName;if(/^ISONET\s+(?:LTT|PF|T)\s*\(\s*\d+\s*\)\s*$/i.test(String(p.name||'').trim()))return String(p.name).trim().replace(/\s*\(\s*\d+\s*\)\s*$/,'');if(p.familyName)return p.familyName;if(isLobelabMonitoring(p))return 'LOBELAB';
  if(discreteStock(p))return p.name;
  let name=String(p.name||'').trim();
  name=name.replace(/\s*(?:\/|[-,])\s*\d+(?:[.,]\d+)?\s*(?:kg|kgs?|g|grs?\.?|gramos?|l|lts?\.?|litros?|ml|cm3|cm³|cc|uds?\.?|unidades?)\s*$/i,'');
