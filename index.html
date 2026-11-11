@@ -423,7 +423,7 @@ ${input('Código / referencia (opcional)','ref')}
 ${input('Municipio (opcional)','place')}${input('Teléfono (opcional)','phone','tel')}
 <button class="btn" ${active.length>=100?'disabled':''}>Crear cliente</button></form>
 <div class="notice">Dar de baja conserva los tratamientos, compras, documentos y planes históricos. Puedes reactivar al cliente cuando vuelva a trabajar con vosotros.</div></div>
-</div></div>`}
+</div>`}
 function detail(){let c=cust(selected);if(!c)return `<div class="alert">Cliente no encontrado.</div>`;let tabs=[['stock','Existencias'],['historial','Historial'],['tratamientos','Aplicaciones'],['planes','Plan abonado'],['documentos','Documentos'],['visitas','Visitas'],['pedidos','Pedidos'],['alertas','Alertas']];let content='';if(customerTab==='stock'){let p=productsFor(c.id);content=p.length?`<div class="tablewrap"><table><thead><tr><th>Producto</th><th>Unidad</th><th>Existencias</th><th>Estado</th></tr></thead><tbody>${p.map(x=>{let amount=stockBase(c.id,x.id);return `<tr><td><b>${esc(x.name)}</b><div class="muted">${esc(catLabel(x.category))}</div></td><td>${esc(x.unit)}</td><td><b>${stockView(c.id,x.id)}</b></td><td><span class="pill ${amount<0?'red':amount===0?'warn':''}">${amount<0?'Negativo':amount===0?'Agotado':'Disponible'}</span></td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">Sin existencias registradas todavía.</div>'}
 else if(customerTab==='historial')content=movementTable(model.movements.filter(x=>x.customerId===c.id).slice().reverse());
 else if(customerTab==='tratamientos')content=movementTable(model.movements.filter(x=>x.customerId===c.id&&x.kind==='tratamiento').slice().reverse());
