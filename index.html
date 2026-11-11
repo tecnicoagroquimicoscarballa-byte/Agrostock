@@ -38,6 +38,9 @@ async function driveConnect(){if(!navigator.onLine)return t('Para conectar Googl
 
 const SYNC_NAME='agrostock-sync-v1.json',SYNC_KEYS=['customers','products','movements','documents','plans','visits','orders','alerts','clientStatuses'];
 let syncBusy=false,syncMessage='Todavía no se ha sincronizado en esta sesión.',autoSyncTimer=null,autoSyncPending=false,autoSyncLastSuccess='';
+let autoSyncPoll=null;
+function autoSyncHeartbeat(){if(!autoSyncEnabled||document.hidden||!navigator.onLine||!driveIsConnected()||syncBusy)return;syncAutoSchedule(1200);}
+autoSyncPoll=setInterval(autoSyncHeartbeat,60000);
 const AUTO_SYNC_KEY='agrostock-auto-sync-v1';
 let autoSyncEnabled=false;
 try{autoSyncEnabled=localStorage.getItem(AUTO_SYNC_KEY)==='1'}catch(e){}
@@ -305,7 +308,28 @@ function csv(rows,filename){let enc=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
 function exportCSV(which){if(which==='stock'){let rows=[['Cliente','Referencia','Producto','Unidad','Stock']];model.customers.forEach(c=>productsFor(c.id).forEach(p=>rows.push([c.name,c.ref,p.name,p.unit,fmt(fromBase(stockBase(c.id,p.id),p.unit))])));csv(rows,'AgroStock_existencias_'+today()+'.csv')}else{let rows=[['Fecha','Registrado','Técnico','Cliente','Tipo','Producto','Categoría','Cantidad firmada','Unidad','Parcela','Hectáreas','Plan de abonado','Observaciones','ID movimiento']];model.movements.forEach(m=>{let p=prod(m.productId);rows.push([m.date,m.recorded,m.technician,cName(m.customerId),m.kind,pName(m.productId),catLabel(p?.category),p?fmt(fromBase(m.delta,p.unit)):'',p?.unit,m.plot,m.area,findPlanLine(m.planLineId)?.plan.name||'',m.notes,m.id])});csv(rows,'AgroStock_movimientos_'+today()+'.csv')}t('CSV descargado para Excel')}
 function norm(s){return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim()}
 function findByName(items,q){let x=norm(q);return items.find(a=>norm(a.name)===x)||items.filter(a=>norm(a.name).includes(x)||x.includes(norm(a.name))).sort((a,b)=>b.name.length-a.name.length)[0]}
-function interpret(raw){let s=raw.trim(),n=norm(s);if(!s)throw Error('Escribe o dicta una orden.');let query=n.match(/^(?:consultar|mostrar|ver|cuanto|que tiene|stock|existencias)(?: el)?(?: stock| existencias)?(?: de| para)? (.+)$/);if(query){let c=findByName(model.customers,query[1]);if(!c)throw Error('No encuentro el cliente. Usa su nombre exacto.');return {view:true,customerId:c.id}}
+function spokenNumbers(raw){
+const d={cero:0,un:1,uno:1,una:1,dos:2,tres:3,cuatro:4,cinco:5,seis:6,siete:7,ocho:8,nueve:9,diez:10,once:11,doce:12,trece:13,catorce:14,quince:15,dieciseis:16,diecisiete:17,dieciocho:18,diecinueve:19,veinte:20,treinta:30,cuarenta:40,cincuenta:50,sesenta:60,setenta:70,ochenta:80,noventa:90,cien:100,ciento:100,doscientos:200,trescientos:300,cuatrocientos:400,quinientos:500,seiscientos:600,setecientos:700,ochocientos:800,novecientos:900,mil:1000};
+const words=norm(raw).replace(/[.,;:!?]/g,' ').split(/\s+/);
+let out=[],i=0;
+while(i<words.length){
+const w=words[i],veinti=w.match(/^veinti(?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)$/);
+if(!(w in d)&&!veinti){out.push(words[i++]);continue;}
+let value=0,group=0,j=i,found=false;
+while(j<words.length){
+const x=words[j],v=d[x],v21=x.match(/^veinti(un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)$/);
+if(v21){group+=20+d[v21[1]];found=true;j++;continue;}
+if(x==='y'&&j+1<words.length&&words[j+1] in d&&d[words[j+1]]<10){j++;continue;}
+if(v===undefined)break;
+found=true;
+if(x==='mil'){value+=(group||1)*1000;group=0;}else if(v===100){group=(group||1)*100;}else if(v>=200){group+=v;}else{group+=v;}
+j++;
+}
+if(found){out.push(String(value+group));i=j;}else{out.push(words[i++]);}
+}
+return out.join(' ');
+}
+function interpret(raw){let s=raw.trim(),n=spokenNumbers(s);if(!s)throw Error('Escribe o dicta una orden.');let query=n.match(/^(?:consultar|mostrar|ver|cuanto|que tiene|stock|existencias)(?: el)?(?: stock| existencias)?(?: de| para)? (.+)$/);if(!query&&/^(consultar|mostrar|ver|stock|existencias)(?: el)?(?: stock| existencias)?$/.test(n)&&$('quickCustomer')?.value){const candidate=cust($('quickCustomer').value);if(candidate&&!clientArchived(candidate.id))return {view:true,customerId:candidate.id};}if(query){let c=findByName(model.customers,query[1]);if(!c)throw Error('No encuentro el cliente. Usa su nombre exacto.');return {view:true,customerId:c.id}}
 let kind=/\b(revision|recuento|quedan|queda|hay en almacen)\b/.test(n)?'revision':/\b(tratamiento|tratar|aplico|aplicado|aplicar|aplicacion|abonado|abonar|fertilizacion|fertilizar|enmienda|consumio|gasto|descontar|instalo|instalado)\b/.test(n)?'tratamiento':/\b(anadir|agregar|compr|entrada|recib|sumar|incorporar)\b/.test(n)?'entrada':null;if(!kind)throw Error('No identifiqué la operación. Prueba «Añadir», «Tratamiento» o «Revisión».');
 let customer=model.customers.filter(c=>!clientArchived(c.id)&&n.includes(norm(c.name))).sort((a,b)=>b.name.length-a.name.length)[0];if(!customer&&$('quickCustomer')?.value)customer=cust($('quickCustomer').value);if(!customer||clientArchived(customer.id))throw Error('No identifiqué un cliente activo. Selecciónalo en Productor o indica su nombre.');let product=model.products.filter(p=>n.includes(norm(p.name))).sort((a,b)=>b.name.length-a.name.length)[0];if(!product)throw Error('No identifiqué el producto. Debe estar creado en el catálogo y escrito con su nombre.');
 let match=n.match(/(\d+(?:[.,]\d+)?)\s*(kg|kilos?|kilogramos?|g|gramos?|l|litros?|cm3|cc|centimetros cubicos|ud\.?|unidades?|difusores?)/i);
@@ -380,7 +404,7 @@ el=$('addDocument');if(el)el.onsubmit=submitDoc;el=$('searchCustomers');if(el)el
 quickFill();el=$('resetTests');if(el)el.onclick=clearTestDataset;el=$('syncNow');if(el)el.onclick=()=>syncNow(false);el=$('autoSyncToggle');if(el)el.onchange=e=>syncAutoToggle(e.target.checked);el=$('syncBackup');if(el)el.onclick=backup;el=$('driveConnect');if(el)el.onclick=driveConnect;el=$('driveDisconnect');if(el)el.onclick=driveDisconnect;
 el=$('techForm');if(el)el.onsubmit=async e=>{e.preventDefault();model.tech=new FormData(e.target).get('tech').trim();await save();t('Perfil actualizado')};el=$('exportClient');if(el)el.onclick=()=>exportCustomer($('shareCustomer').value);el=$('restoreFile');if(el)el.onchange=async e=>{try{if(e.target.files[0])await restore(e.target.files[0])}catch(err){t('Error: '+err.message,'error')}};el=$('importClient');if(el)el.onchange=async e=>{try{if(e.target.files[0])await importCustomer(e.target.files[0])}catch(err){t('Error: '+err.message,'error')}};el=$('csvStock');if(el)el.onclick=()=>exportCSV('stock');el=$('csvHistory');if(el)el.onclick=()=>exportCSV('history');el=$('csvPlans');if(el)el.onclick=exportPlansCSV;for(let key of ['Visits','Orders','Alerts']){let btn=$('csv'+key);if(btn)btn.onclick=()=>exportExtraCSV(key.toLowerCase())}}
 $('backupTop').onclick=backup;
-window.addEventListener('online',()=>syncAutoSchedule(1500));
+window.addEventListener('online',()=>{syncAutoSchedule(1500);if(autoSyncEnabled&&drivePreferred&&!driveIsConnected())trySilentReconnect()});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncAutoSchedule(2000)});
 if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(e=>console.warn('No se pudo activar el modo offline',e));
 (async()=>{try{db=await openDB();let saved=await dbGet();if(saved){ensure(saved);model=saved}render();if(autoSyncEnabled&&drivePreferred&&navigator.onLine)trySilentReconnect();}catch(e){console.error(e);$('app').innerHTML='<div class="alert error"><h2>No se puede abrir la base de datos local</h2>Utiliza Chrome, Edge o Firefox con almacenamiento habilitado, fuera del modo privado. Si abres el archivo desde un móvil, quizá necesites un navegador que admita IndexedDB para archivos locales.</div>'}})();
