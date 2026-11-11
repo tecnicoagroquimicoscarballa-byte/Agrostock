@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='54', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='55', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -377,12 +377,21 @@ function cName(id){return cust(id)?.name||'Cliente no encontrado'}
 function baseUnit(unit){return unit==='kg'||unit==='g'?'g':unit==='L'||unit==='cm³'?'cm³':'ud.'}
 function toBase(amount,unit){return num(amount)*(unit==='kg'||unit==='L'?1000:1)}
 function fromBase(amount,unit){return amount/(unit==='kg'||unit==='L'?1000:1)}
-function stockBase(cid,pid){const p=prod(pid);if(!p)return 0;const key=stockGroupKey(p);return model.movements.filter(x=>x.customerId===cid&&stockGroupKey(prod(x.productId))===key).reduce((sum,x)=>sum+x.delta,0)}
+function movementStockDelta(m,p){
+if(seedStock(p)&&m.kind==='entrada'&&Number.isFinite(Number(m.packCount))&&Number(m.packSize)>1&&m.qtyUnit!=='ud.')return Number(m.packCount);
+if(seedStock(p)&&m.kind==='entrada'&&Number.isFinite(Number(m.packCount))&&Number(m.packSize)>1&&m.qtyUnit==='ud.')return Number(m.packCount);
+return Number(m.delta)||0;
+}
+function stockBase(cid,pid){const p=prod(pid);if(!p)return 0;const key=stockGroupKey(p);return model.movements.filter(x=>x.customerId===cid&&stockGroupKey(prod(x.productId))===key).reduce((sum,x)=>sum+movementStockDelta(x,prod(x.productId)),0)}
 function seedStock(p){
 if(!p)return false;
 if(p.category==='semillas'||p.stockMode==='envases')return true;
-if(p.stockMode==='contenido')return false;
+// Las familias 51-54 del catálogo Carballa son semillas y material de siembra:
+// el formato (gramos, número de semillas o bolsita) nunca determina la unidad de stock.
+if(p.origin==='catalogo_carballa'&&/^5[1-4]\d{4}$/.test(String(p.code||'')))return true;
 const name=norm(String(p.name||''));
+if(p.origin==='catalogo_carballa'&&/^55\d{4}$/.test(String(p.code||''))&&/\bcesped\b/.test(name))return true;
+if(p.stockMode==='contenido')return false;
 return /\b(semilla|semillas|simiente|simientes|semillas? de|sementes|sementes de)\b/.test(name);
 }
 function itemStock(p){
@@ -434,7 +443,7 @@ function productOptionsForKind(kind,selectedId=''){
  return '<option value="">Selecciona un producto (sin presentación)</option>'+[...grouped.values()].sort((a,b)=>stockProductName(a).localeCompare(stockProductName(b))).map(p=>`<option value="${esc(p.id)}" ${p.id===chosen?'selected':''}>${esc(stockDisplayName(p))} (${esc(stockUnit(p))})</option>`).join('');
 }
 function stockView(cid,pid){const p=prod(pid);return p?fmt(fromStockBase(stockBase(cid,pid),p))+' '+stockUnit(p):'—'}
-function signed(m){let p=prod(m.productId);if(!p)return '';let value=fromStockBase(m.delta,p);return (value>0?'+':'')+fmt(value)+' '+stockUnit(p)}
+function signed(m){let p=prod(m.productId);if(!p)return '';let value=fromStockBase(movementStockDelta(m,p),p);return (value>0?'+':'')+fmt(value)+' '+stockUnit(p)}
 function productsFor(cid){return groupProductsFor(cid)}
 const customerOptions=(selectedId='')=>'<option value="">Selecciona un cliente</option>'+model.customers.filter(c=>!clientArchived(c.id)||c.id===selectedId).map(c=>`<option value="${esc(c.id)}" ${selectedId===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
 const productOptions=(selectedId='')=>'<option value="">Selecciona un producto</option>'+model.products.filter(p=>(productActivated(p.id)&&!productHidden(p.id))||p.id===selectedId).sort((a,b)=>a.name.localeCompare(b.name)).map(p=>`<option value="${esc(p.id)}" ${selectedId===p.id?'selected':''}>${esc(p.name)} (${esc(stockUnit(p))})${p.code?' · Ref. '+esc(p.code):''}${p.registration?' · Reg. '+esc(p.registration):''}</option>`).join('');
