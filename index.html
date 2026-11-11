@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='24', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='25', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],updated:''};
@@ -270,36 +270,62 @@ function navigate(s,cid=''){screen=s;if(cid)selected=cid;render();window.scrollT
 // Los selectores mantienen su valor real, aunque el usuario filtre la lista;
 // solamente se muestran las primeras 70 coincidencias para acelerar Android.
 function installQuickSearch(){
-const selectElements=[...document.querySelectorAll('select')];
-for(const sel of selectElements){
-const all=[...sel.options].map(o=>({value:o.value,text:o.text,disabled:o.disabled}));
-if(all.length<12&&!['product','customer','quickCustomer','shareCustomer'].includes(sel.id))continue;
-if(sel.closest('.quick-select-wrap'))continue;
-const wrap=document.createElement('div');wrap.className='quick-select-wrap';
+if(!document.getElementById('ag-combobox-style')){
+const style=document.createElement('style');style.id='ag-combobox-style';
+style.textContent='.ag-combo{position:relative;width:100%}.ag-combo-input{width:100%;box-sizing:border-box;padding-right:36px!important}.ag-combo-icon{position:absolute;right:13px;top:12px;pointer-events:none;opacity:.65}.ag-combo-menu{position:absolute;left:0;right:0;top:calc(100% + 3px);max-height:245px;overflow-y:auto;overscroll-behavior:contain;background:var(--card,#fff);background-color:#fff;color:#202b24;border:1px solid #b9c6bd;border-radius:10px;z-index:110;box-shadow:0 7px 22px #0003}.ag-combo-item{display:block;width:100%;text-align:left;padding:11px 13px;border:0;border-bottom:1px solid #e9eee9;background:#fff;color:#1d3325;font:inherit;cursor:pointer;overflow-wrap:anywhere}.ag-combo-item:focus,.ag-combo-item:hover,.ag-combo-item.ag-active{background:#e8f3ec}.ag-combo-empty{padding:12px;color:#56625a}';
+document.head.appendChild(style);
+}
+for(const sel of [...document.querySelectorAll('select')]){
+if(sel.id==='planLine')continue;
+const options=[...sel.options].map(o=>({value:o.value,text:o.text,disabled:o.disabled}));
+const isMain=['product','customer','quickCustomer','shareCustomer'].includes(sel.id);
+if(!isMain&&options.length<12)continue;
+if(sel.closest('.ag-combo'))continue;
+const wrap=document.createElement('div');wrap.className='ag-combo';
 sel.parentNode.insertBefore(wrap,sel);wrap.appendChild(sel);
-const search=document.createElement('input');
-search.type='search';search.autocomplete='off';search.placeholder='🔎 Buscar por nombre, código o registro…';search.className='quick-select-search';
-search.setAttribute('aria-label','Buscar en '+(sel.id||'listado'));
-wrap.insertBefore(search,sel);
-const note=document.createElement('small');note.className='muted';note.style.display='block';note.style.marginTop='3px';
-wrap.appendChild(note);
-let current=sel.value;
-const rebuild=(needle='')=>{
-const normalized=norm(needle),matches=all.filter(o=>o.value&&norm(o.text).includes(normalized));
-const included=matches.slice(0,70),keep=all.find(o=>o.value===current);
-const choices=[all.find(o=>!o.value),keep,...included].filter(Boolean);
-const used=new Set();
-const html=choices.filter(o=>{if(used.has(o.value))return false;used.add(o.value);return true;});
-sel.replaceChildren(...html.map(o=>{const el=document.createElement('option');el.value=o.value;el.textContent=o.text;el.disabled=o.disabled;return el;}));
-if(!matches.length&&needle){const empty=document.createElement('option');empty.value='';empty.disabled=true;empty.textContent='No hay coincidencias';sel.appendChild(empty);}
-sel.value=current;
-if(sel.value!==current)sel.value='';
-note.textContent=normalized?(matches.length?matches.length+' coincidencia(s)'+(matches.length>70?' · mostrando las primeras 70':''):'Sin coincidencias'):'Escribe para filtrar · '+(all.length-1)+' opciones disponibles';
+sel.style.display='none';
+const field=document.createElement('input');
+field.type='text';field.className='ag-combo-input';field.autocomplete='off';
+field.setAttribute('role','combobox');field.setAttribute('aria-autocomplete','list');field.setAttribute('aria-expanded','false');
+const placeholder=options.find(o=>!o.value)?.text||'Selecciona una opción';
+field.placeholder='🔎 '+placeholder;field.setAttribute('aria-label','Buscar '+(sel.id||'opción'));
+const arrow=document.createElement('span');arrow.className='ag-combo-icon';arrow.textContent='⌄';
+const menu=document.createElement('div');menu.className='ag-combo-menu';menu.setAttribute('role','listbox');menu.hidden=true;
+wrap.append(field,arrow,menu);
+let current=sel.value,activeIndex=-1,visible=[];
+const selectedLabel=()=>options.find(o=>o.value===current)?.text||'';
+const close=()=>{menu.hidden=true;field.setAttribute('aria-expanded','false');activeIndex=-1;};
+const draw=(query)=>{
+const normQuery=norm(query);
+visible=options.filter(o=>o.value&&!o.disabled&&(!normQuery||norm(o.text).includes(normQuery))).slice(0,35);
+menu.replaceChildren();
+if(!visible.length){const item=document.createElement('div');item.className='ag-combo-empty';item.textContent='No hay coincidencias';menu.appendChild(item);}
+for(let i=0;i<visible.length;i++){
+const opt=visible[i],btn=document.createElement('button');btn.type='button';btn.className='ag-combo-item';btn.setAttribute('role','option');btn.textContent=opt.text;
+btn.addEventListener('pointerdown',e=>e.preventDefault());
+btn.addEventListener('click',()=>choose(opt));
+menu.appendChild(btn);
+}
+activeIndex=-1;menu.hidden=false;field.setAttribute('aria-expanded','true');
 };
-search.addEventListener('input',()=>rebuild(search.value));
-sel.addEventListener('change',()=>{current=sel.value;});
-search.addEventListener('search',()=>rebuild(search.value));
-rebuild();
+const choose=(opt)=>{
+current=opt.value;sel.value=opt.value;field.value=opt.text;close();
+sel.dispatchEvent(new Event('change',{bubbles:true}));
+};
+field.addEventListener('focus',()=>{field.select();draw('')});
+field.addEventListener('input',()=>draw(field.value));
+field.addEventListener('keydown',e=>{
+if(e.key==='Escape'){close();field.value=selectedLabel();field.blur();return;}
+if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+e.preventDefault();if(menu.hidden)draw('');
+if(visible.length){activeIndex=e.key==='ArrowDown'?(activeIndex+1)%visible.length:(activeIndex+visible.length-1)%visible.length;[...menu.children].forEach((x,i)=>x.classList.toggle('ag-active',i===activeIndex));menu.children[activeIndex]?.scrollIntoView({block:'nearest'});}
+}
+if(e.key==='Enter'&&!menu.hidden){e.preventDefault();if(visible.length===1)choose(visible[0]);else if(activeIndex>=0)choose(visible[activeIndex]);}
+});
+field.addEventListener('blur',()=>{setTimeout(()=>{if(!wrap.contains(document.activeElement)){close();field.value=selectedLabel();}},120)});
+sel.addEventListener('change',()=>{current=sel.value;field.value=selectedLabel();});
+field.value=selectedLabel();
+document.addEventListener('pointerdown',e=>{if(!wrap.contains(e.target)){close();field.value=selectedLabel();}});
 }
 }
 function render(){let items=[['inicio','🏠 Inicio'],['clientes','👥 Clientes'],['movimientos','📦 Movimientos'],['planes','🌿 Abonado'],['visitas','📝 Visitas'],['pedidos','🛒 Pedidos'],['alertas','⏰ Alertas'],['comandos','🎙️ Entrada rápida'],['documentos','📷 Documentos'],['datos','⚙️ Datos y copias']];$('nav').innerHTML=items.map(([s,n])=>`<button class="${screen===s?'active':''}" data-nav="${s}">${n}</button>`).join('');$('app').innerHTML=({inicio:home,clientes:customersScreen,cliente:detail,movimientos:movementScreen,comandos:commandScreen,documentos:documentsScreen,planes:plansScreen,visitas:visitsScreen,pedidos:ordersScreen,alertas:alertsScreen,datos:dataScreen})[screen]();wire();installQuickSearch();}
