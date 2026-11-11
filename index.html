@@ -250,7 +250,66 @@ model.clientStatuses.push({id:id(),customerId:cid,status:archived?'baja':'activo
 await save();showArchivedCustomers=archived;selected='';navigate('clientes');t(archived?'Cliente dado de baja; historial conservado':'Cliente reactivado');
 }
 function cust(id){return model.customers.find(x=>x.id===id)}
-let productFilter='',showHiddenProducts=false;
+let productFilter='',productCatalogTab='referencia',customerDirectoryFilter='';
+function productActivated(pid,data=model){
+const statuses=(data.productSelections||[]).filter(x=>x.productId===pid).sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))||String(b.id).localeCompare(String(a.id)));
+if(statuses.length)return statuses[0].status==='incorporado';
+const p=data.products.find(x=>x.id===pid);
+return !!p&&(p.origin!=='catalogo_carballa'||data.movements.some(m=>m.productId===pid));
+}
+async function setProductSelection(pid,enabled){
+const p=prod(pid);if(!p)return;
+if(!enabled&&model.movements.some(m=>m.productId===pid)&&!confirm('Este artículo tiene movimientos. Se retirará de los selectores de operaciones nuevas, pero se conservará todo su historial. ¿Continuar?'))return;
+model.productSelections.push({id:id(),productId:pid,status:enabled?'incorporado':'referencia',at:stamp()});
+await save();render();t(enabled?'Producto incorporado al trabajo':'Producto devuelto al directorio');
+}
+function productCatalogList(){
+const activeCount=model.products.filter(p=>productActivated(p.id)&&!productHidden(p.id)).length;
+const data=model.products.filter(p=>productCatalogTab==='ocultos'?productHidden(p.id):!productHidden(p.id)&&(productCatalogTab==='incorporados'?productActivated(p.id):!productActivated(p.id))).filter(p=>norm([p.name,p.code,p.registration].join(' ')).includes(norm(productFilter))).sort((a,b)=>a.name.localeCompare(b.name));
+return `<h3>Productos de trabajo: ${activeCount} · Directorio: ${model.products.length}</h3>
+<div class="actions">
+<button class="btn ${productCatalogTab==='incorporados'?'':'alt'}" type="button" data-prod-tab="incorporados">Mis productos (${activeCount})</button>
+<button class="btn ${productCatalogTab==='referencia'?'':'alt'}" type="button" data-prod-tab="referencia">Buscar en Carballa</button>
+<button class="btn ${productCatalogTab==='ocultos'?'':'alt'}" type="button" data-prod-tab="ocultos">Ocultos</button></div>
+<div class="field"><label for="productCatalogSearch">Buscar por nombre, código o registro</label><input type="search" id="productCatalogSearch" value="${esc(productFilter)}" placeholder="Ej.: Profiler, Gorra, 150057"></div>
+<p class="muted small">${data.length} coincidencias · mostrando las primeras 35. Solo «Mis productos» aparece en las operaciones nuevas.</p>
+<div class="tablewrap"><table><tbody>${data.slice(0,35).map(p=>`<tr><td><strong>${esc(p.name)}</strong><div class="muted">${esc(p.code||'Sin código')} · ${esc(p.unit)} · ${esc(catLabel(p.category))}${p.registration?' · Reg. '+esc(p.registration):''}</div></td><td><div class="actions" style="justify-content:end">
+${productCatalogTab==='referencia'?`<button type="button" class="btn" data-product-select="${esc(p.id)}" data-enabled="1">+ Incorporar</button><button type="button" class="btn alt" data-product-hide="${esc(p.id)}" data-hide="1">Ocultar</button>`:
+productCatalogTab==='incorporados'?`<button type="button" class="btn alt" data-product-select="${esc(p.id)}" data-enabled="0">Retirar</button>`:
+`<button type="button" class="btn alt" data-product-hide="${esc(p.id)}" data-hide="0">Recuperar</button>`}
+</div></td></tr>`).join('')}</tbody></table></div>${data.length?'':'<div class="empty">No hay artículos con ese filtro.</div>'}`;
+}
+function customerDirectoryPanel(){
+const rows=(model.customerDirectory||[]).filter(c=>norm([c.name,c.commercialName,c.code,c.municipality].join(' ')).includes(norm(customerDirectoryFilter))).sort((a,b)=>a.name.localeCompare(b.name));
+const activeCodes=new Set(model.customers.map(c=>c.ref).filter(Boolean));
+return `<h2>Buscar en el directorio Carballa</h2><p class="muted">Directorio de referencia: ${model.customerDirectory.length} fichas. No cuentan como clientes activos hasta que los incorpores.</p>
+<div class="field"><label for="clientDirectorySearch">Buscar agricultor por nombre, razón comercial, código o concello</label><input id="clientDirectorySearch" type="search" value="${esc(customerDirectoryFilter)}" placeholder="Ej.: José Fernández o 1002"></div>
+${!customerDirectoryFilter.trim()&&rows.length>40?'<p class="muted small">Empieza a escribir para encontrar un cliente.</p>':
+`<p class="muted small">${rows.length} coincidencias · primeras 25</p><div class="tablewrap"><table><tbody>${rows.slice(0,25).map(c=>`<tr><td><b>${esc(c.commercialName||c.name)}</b>${c.commercialName?'<div class="muted">'+esc(c.name)+'</div>':''}<div class="muted">${esc(c.code)} · ${esc(c.municipality||'')} ${c.lastPurchase?' · Últ. venta '+esc(c.lastPurchase):''}</div></td><td><button class="btn ${activeCodes.has(c.code)?'alt':''}" type="button" data-customer-import="${esc(c.code)}" ${activeCodes.has(c.code)?'disabled':''}>${activeCodes.has(c.code)?'Ya incorporado':'+ Incorporar'}</button></td></tr>`).join('')}</tbody></table></div>`}
+${!model.customerDirectory.length?'<div class="notice">Importa primero el directorio JSON desde Datos y copias. No es necesario dar de alta los clientes uno a uno.</div>':''}`;
+}
+async function importCustomerDirectory(file){
+if(syncBusy)throw Error('Finaliza antes la sincronización actual');
+const j=JSON.parse(await file.text());
+if(j.type!=='AgroStockCustomerDirectory'||!Array.isArray(j.customers)||j.customers.length>10000)throw Error('Formato de directorio Carballa incorrecto');
+const existing=new Set(model.customerDirectory.map(c=>c.code));let count=0;
+for(const c of j.customers){
+const code=String(c.code||'').trim(),name=String(c.name||'').trim();
+if(!code||!name||existing.has(code))continue;
+model.customerDirectory.push({id:'carballa-client-'+code,code,name,commercialName:String(c.commercialName||'').trim(),municipality:String(c.municipality||'').trim(),phone:String(c.phone||'').trim(),phone2:String(c.phone2||'').trim(),email:String(c.email||'').trim(),lastPurchase:String(c.lastPurchase||'').trim()});
+existing.add(code);count++;
+}
+if(count){await save();render();}
+alert('Directorio Carballa: '+count+' clientes nuevos importados. Ninguno se ha dado de alta como cliente activo. Los datos se sincronizarán al conectar Drive.');
+}
+async function incorporateCustomer(code){
+const source=model.customerDirectory.find(c=>c.code===code);if(!source)return;
+if(model.customers.filter(c=>!clientArchived(c.id)).length>=100)return t('Ya hay 100 clientes activos. Da de baja uno antes de incorporar otro.','error');
+const known=model.customers.find(c=>c.ref===code||norm(c.name)===norm(source.name));
+if(known){selected=known.id;customerTab='stock';navigate('cliente');return t('Este cliente ya existe');}
+const customer={id:'carballa-client-'+code,name:source.name,commercialName:source.commercialName||'',ref:code,place:source.municipality||'',phone:source.phone||'',phone2:source.phone2||'',email:source.email||'',lastPurchase:source.lastPurchase||'',origin:'directorio_carballa',created:stamp()};
+model.customers.push(customer);await save();selected=customer.id;customerTab='stock';navigate('cliente');t('Cliente incorporado');
+}
 function latestProductStatus(pid,data=model){
 const states=(data.productStatuses||[]).filter(x=>x.productId===pid);
 if(!states.length)return 'activo';
@@ -264,15 +323,6 @@ const verb=hide?'ocultar':'mostrar';
 if(!confirm('¿Quieres '+verb+' «'+p.name+'» en los selectores de productos?\n\nSe conservarán todos sus movimientos, referencias y datos históricos. Podrás revertirlo en cualquier momento.'))return;
 model.productStatuses.push({id:id(),productId:pid,status:hide?'oculto':'activo',at:stamp(),technician:model.tech});
 await save();render();t(hide?'Producto oculto en el catálogo operativo':'Producto recuperado');
-}
-function productCatalogList(){
-const list=model.products.filter(p=>productHidden(p.id)===showHiddenProducts).filter(p=>norm(p.name+' '+(p.code||'')+' '+(p.registration||'')).includes(norm(productFilter))).sort((a,b)=>a.name.localeCompare(b.name));
-return `<div class="row between"><h3>Catálogo de productos (${model.products.length})</h3><span class="muted small">${model.products.filter(p=>productHidden(p.id)).length} ocultos</span></div>
-<div class="actions"><button type="button" class="btn ${showHiddenProducts?'alt':''}" data-prod-view="activos">Disponibles</button><button type="button" class="btn ${showHiddenProducts?'':'alt'}" data-prod-view="ocultos">Ocultos</button></div>
-<div class="field"><label for="productCatalogSearch">Buscar producto para ${showHiddenProducts?'recuperar':'ocultar'}</label><input id="productCatalogSearch" type="search" value="${esc(productFilter)}" placeholder="Nombre, código o registro (ej.: Gorra)"></div>
-<p class="muted small">${list.length} coincidencias · mostrando hasta 40. Los artículos ocultos no salen en compras y tratamientos nuevos.</p>
-<div class="tablewrap"><table><tbody>${list.slice(0,40).map(p=>`<tr><td><b>${esc(p.name)}</b><div class="muted">${esc(catLabel(p.category))} ${p.code?'· Ref. '+esc(p.code):''} ${p.registration?'· Reg. '+esc(p.registration):''}</div></td><td><button type="button" class="btn alt" data-product-hide="${esc(p.id)}" data-hide="${showHiddenProducts?'0':'1'}">${showHiddenProducts?'↩ Recuperar':'Ocultar'}</button></td></tr>`).join('')}</tbody></table></div>
-${!list.length?'<div class="empty">No hay productos con ese filtro.</div>':''}`;
 }
 function prod(id){return model.products.find(x=>x.id===id)}
 function pName(id){return prod(id)?.name||'Producto no encontrado'}
