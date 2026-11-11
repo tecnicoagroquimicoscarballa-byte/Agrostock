@@ -1,4 +1,4 @@
-const CACHE='agrostock-v3-44-catalog-updates-20261111';
+const CACHE='agrostock-v3-45-products-reset-new-master-20261111';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icons/icon.svg'];
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
