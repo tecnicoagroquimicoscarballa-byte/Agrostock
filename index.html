@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='90', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='91', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -706,7 +706,7 @@ function updateMultiLotQuantityHint(productRow,line){
  const shownUnit=unit.value||stockUnit(p);
  if(!found){
   qty.removeAttribute('max');qty.placeholder='Cantidad utilizada';
-  if(hint)hint.textContent='Sin lote identificado: se propondrá FIFO si hay saldo; el exceso quedará pendiente de compra y lote.';
+  if(hint)hint.textContent='Sin lote indicado: se guardará sin asignar lote. Solo el déficit real quedará pendiente de compra.';
   if(hint)hint.style.color='';
   return;
  }
@@ -739,7 +739,7 @@ function updateMultiLotChoices(productRow){
   const select=line.querySelector('[name=lineLot]');if(!select||select.tagName!=='SELECT')continue;
   const own=select.value;
   const taken=new Set(lines.filter(x=>x!==line).map(x=>x.querySelector('[name=lineLot]')?.value?.toLowerCase()).filter(Boolean));
-  const choices='<option value="">Sin lote / pendiente de compra</option>'+lots.filter(x=>x.lot===own||!taken.has(x.lot.toLowerCase())).map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+'</option>').join('');
+  const choices='<option value="">Sin lote (opcional)</option>'+lots.filter(x=>x.lot===own||!taken.has(x.lot.toLowerCase())).map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+'</option>').join('');
   select.innerHTML=choices;
   if(lots.some(x=>x.lot===own))select.value=own;
   select.onchange=()=>{updateMultiLotChoices(productRow);updateMultiPending(productRow);};
@@ -803,7 +803,7 @@ function multiAddRow(){
   const pack=p&&!discreteStock(p)?commercialPack(p):null,needs=!!(entry&&p&&!discreteStock(p)&&!pack);
   wrap.style.display=needs?'':'none';packInput.required=needs;packInput.disabled=!needs;
   const hint=row.querySelector('.multi-hint');
-  hint.textContent=!p?'Selecciona un producto':entry?(pack?'Formato identificado: '+fmt(pack.size)+' '+p.unit+' por envase.':'Formato no identificado: rellena el contenido por envase, en '+p.unit+'.'):revision?'Existencias actuales: '+stockView(selected,p.id)+'. Introduce el total contado.':'Existencias actuales: '+stockView(selected,p.id)+' (FIFO si dejas el lote sin indicar).';
+  hint.textContent=!p?'Selecciona un producto':entry?(pack?'Formato identificado: '+fmt(pack.size)+' '+p.unit+' por envase. El lote puede dejarse vacío.':'Formato no identificado: rellena el contenido por envase, en '+p.unit+'. El lote es opcional.'):revision?'Existencias actuales: '+stockView(selected,p.id)+'. Introduce el total contado.':'Existencias actuales: '+stockView(selected,p.id)+'. El lote es opcional.';
   for(const line of row.querySelectorAll('.multi-lot-line')){const unit=line.querySelector('[name=lineUnit]');if(p){unit.value=discreteStock(p)?'ud.':p.unit;unit.disabled=entry||discreteStock(p);}}
   updateMultiLotChoices(row);
   updateMultiPending(row);
@@ -927,29 +927,12 @@ async function multiSubmit(e){
      spentGroup.set(key,usedGroup+confirmed);
      split(required-confirmed,'',true);
     }else{
-     let rest=required,used=0;
-     // FIFO over actual lot balances, without requiring that the whole request fit.
-     const summary=lotSummary(selected,m.productId);
-     const familyLots=summary.lots.filter(x=>x.amount>0.000001);
-     const historicalDates=new Map();
-     for(const past of model.movements){
-      if(past.customerId!==selected||past.kind!=='entrada'||stockGroupKey(prod(past.productId))!==key||!past.lot)continue;
-      const date=String(past.date||'9999-12-31'),old=historicalDates.get(past.lot);
-      if(!old||date<old)historicalDates.set(past.lot,date);
-     }
-     familyLots.sort((a,b)=>(historicalDates.get(a.lot)||'9999-12-31').localeCompare(historicalDates.get(b.lot)||'9999-12-31')||a.lot.localeCompare(b.lot));
-     for(const x of familyLots){
-      const lk=key+'::'+x.lot.toLowerCase();
-      const free=Math.max(0,x.amount-(spentLot.get(lk)||0));
-      const take=Math.min(rest,free,Math.max(0,groupFree-used));
-      if(take>0.0000001){split(take,x.lot);rest-=take;used+=take;spentLot.set(lk,(spentLot.get(lk)||0)+take);}
-      if(rest<=0.0000001)break;
-     }
-     // Stock without a known lot may still be consumed as unassigned stock.
-     const confirmedNoLot=Math.min(rest,Math.max(0,groupFree-used));
-     if(confirmedNoLot>0.0000001){split(confirmedNoLot,'');rest-=confirmedNoLot;used+=confirmedNoLot;}
-     spentGroup.set(key,usedGroup+used);
-     split(rest,'',true);
+     // No lote means no lote. Do not silently distribute across identified batches.
+     // Stock accounting still uses the whole product balance; only a real shortage is pending.
+     const confirmed=Math.min(required,groupFree);
+     split(confirmed,'');
+     spentGroup.set(key,usedGroup+confirmed);
+     split(required-confirmed,'',true);
     }
    }
    moves=expanded;
