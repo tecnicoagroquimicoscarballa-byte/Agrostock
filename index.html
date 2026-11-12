@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='74', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='75', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -583,6 +583,20 @@ function multiForm(){
  const kind=pendingAction.kind;
  return '<form id="multiMovement" class="stack"><p class="notice">Introduce un producto o añade tantos como necesites. Debajo de cada producto puedes añadir varias líneas de cantidad y lote, tanto en compras como en aplicaciones. El contenido por envase solo se solicita si falta el formato comercial. El lote siempre es opcional.</p><div class="fields">'+select('Operación','multiKind',[['entrada','Compra / entrada'],['tratamiento','Aplicación'],['revision','Revisión física (stock contado)'],['salida','Otra salida']].map(([v,label])=>'<option value="'+v+'" '+(kind===v?'selected':'')+'>'+label+'</option>').join(''))+input('Fecha','multiDate','date',pendingAction.date||today(),'required')+'</div><p>Cliente: <b>'+esc(cName(selected))+'</b></p><div id="multiRows" class="stack"></div><button class="btn alt" type="button" id="multiAdd">＋ Añadir otro producto</button><div class="fields">'+input('Parcela (opcional)','multiPlot','text',pendingAction.plot||'')+input('Superficie (ha, opcional)','multiArea','number',pendingAction.area||'','min="0" step="any"')+'</div><div class="field"><label>Observaciones / documento</label><textarea name="multiNotes"></textarea></div><button class="btn" type="submit">Revisar y guardar toda la operación</button></form>';
 }
+function updateMultiLotChoices(productRow){
+ const form=$('multiMovement');if(!form)return;
+ const kind=form.multiKind.value,p=prod(productRow.querySelector('[name=lineProduct]').value);
+ if(!['tratamiento','salida'].includes(kind)||!p)return;
+ const summary=lotSummary(selected,p.id);
+ const lots=summary.lots.filter(x=>x.amount>0.000001);
+ const choices='<option value="">Sin indicar (asignar FIFO si es posible)</option>'+lots.map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+' — '+esc(fmt(fromStockBase(x.amount,p))+' '+stockUnit(p))+' disponibles</option>').join('');
+ for(const line of productRow.querySelectorAll('.multi-lot-line')){
+  const select=line.querySelector('[name=lineLot]');
+  if(!select||select.tagName!=='SELECT')continue;
+  const prev=select.value;select.innerHTML=choices;
+  if(lots.some(x=>x.lot===prev))select.value=prev;
+ }
+}
 function multiAddRow(){
  const form=$('multiMovement'),target=$('multiRows');if(!form||!target)return;
  const kind=form.multiKind.value,entry=kind==='entrada',revision=kind==='revision',row=document.createElement('div');
@@ -601,6 +615,7 @@ function multiAddRow(){
   const hint=row.querySelector('.multi-hint');
   hint.textContent=!p?'Selecciona un producto':entry?(pack?'Formato identificado: '+fmt(pack.size)+' '+p.unit+' por envase.':'Formato no identificado: rellena el contenido por envase, en '+p.unit+'.'):revision?'Existencias actuales: '+stockView(selected,p.id)+'. Introduce el total contado.':'Existencias actuales: '+stockView(selected,p.id)+' (FIFO si dejas el lote sin indicar).';
   for(const line of row.querySelectorAll('.multi-lot-line')){const unit=line.querySelector('[name=lineUnit]');if(p){unit.value=discreteStock(p)?'ud.':p.unit;unit.disabled=entry||discreteStock(p);}}
+  updateMultiLotChoices(row);
  };
  row.querySelector('[name=lineProduct]').onchange=refresh;
  target.appendChild(row);multiAddLotLine(row);refresh();
@@ -612,13 +627,14 @@ function multiAddLotLine(productRow){
  const label=entry?'Número de envases':revision?'Existencias físicas contadas':'Cantidad de producto';
  const unitChoices=U.map(u=>'<option value="'+esc(u)+'">'+esc(u)+'</option>').join('');
  line.innerHTML='<div class="fields"><div class="field"><label>'+label+' *</label><input type="number" name="lineQty" min="'+(revision?'0':entry?'1':'0.000001')+'" step="'+(entry?'1':'any')+'" required inputmode="'+(entry?'numeric':'decimal')+'" placeholder="'+(entry?'Nº de envases':'Cantidad')+'"></div>'
- +'<div class="field"><label>Lote (opcional)</label><input name="lineLot" type="text" maxlength="100" placeholder="Sin indicar"></div></div>'
+ +'<div class="field"><label>Lote (opcional)</label>'+(entry||revision?'<input name="lineLot" type="text" maxlength="100" placeholder="Sin indicar">':'<select name="lineLot"><option value="">Sin indicar (FIFO si es posible)</option></select>')+'</div></div>'
  +'<div class="row between" style="margin-top:7px"><div class="field" style="min-width:100px;flex:1"><label>Unidad de la cantidad</label><select name="lineUnit">'+unitChoices+'</select></div><button class="btn danger multi-remove-lot" type="button">Quitar línea</button></div>';
  line.querySelector('.multi-remove-lot').onclick=()=>{if(list.children.length===1){t('Debe quedar al menos una línea de cantidad por producto.','error');return;}line.remove();};
  list.appendChild(line);
  const p=prod(productRow.querySelector('[name=lineProduct]').value),unit=line.querySelector('[name=lineUnit]');
  if(p)unit.value=discreteStock(p)?'ud.':p.unit;
  unit.disabled=entry||discreteStock(p);
+ updateMultiLotChoices(productRow);
 }
 function multiBuildMove(form,row,lotLine){
  const pid=row.querySelector('[name=lineProduct]').value,p=prod(pid);
