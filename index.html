@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='97', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='98', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -823,6 +823,7 @@ else if(customerTab==='planes')content=clientPlansPanel(c.id);
 else{let docs=model.documents.filter(x=>x.customerId===c.id);content=docs.length?docs.map(d=>documentTile(d)).join(''):'<div class="empty">Sin fotografías archivadas.</div>'}
 return `<div class="row between"><div>${head(esc(c.commercialName||c.name),[c.ref,c.place].filter(Boolean).map(esc).join(' · '))}</div><button class="btn alt" data-nav="clientes">← Clientes</button></div><div class="card">${c.phone||c.email||c.lastPurchase?`<p class="muted small">Contacto: ${esc(c.phone||"—")}${c.phone2?" · "+esc(c.phone2):""}${c.email?" · "+esc(c.email):""}${c.lastPurchase?" · Última venta Carballa: "+esc(c.lastPurchase):""}</p>`:""}<div class="actions" style="margin:0 0 13px">${clientArchived(c.id)?'<span class="pill warn">Cliente dado de baja · solo consulta de historial</span>':'<button class="btn" data-add="entrada">+ Compra</button>'}${clientArchived(c.id)?'':'<button class="btn" data-add="tratamiento">− Aplicación</button><button class="btn alt" data-add="revision">⌕ Revisión</button><button class="btn alt" data-add="salida">− Otra salida</button>'}<button class="btn alt" data-client-plan="1">🌿 Plan de abonado</button><button class="btn alt" data-export-client="${c.id}">Compartir cliente</button><button class="btn alt" data-nav="documentos">📷 Fotografía</button><button class="btn alt" data-nav="visitas">📝 Visita</button><button class="btn alt" data-nav="pedidos">🛒 Pedido</button><button class="btn alt" data-nav="alertas">⏰ Alertas</button><button class="btn alt" data-client-status="${c.id}" data-archived="${clientArchived(c.id)?'0':'1'}">${clientArchived(c.id)?'↩ Reactivar cliente':'Archivar / dar de baja'}</button></div><div class="tabs">${tabs.map(([s,n])=>`<button class="${customerTab===s?'selected':''}" data-ctab="${s}">${n}</button>`).join('')}</div>${pendingAction&&pendingAction.customerId===c.id?`<div class="card" id="activeMovementPanel" style="margin:14px 0;scroll-margin-top:78px"><div class="row between"><h2>Registrar ${pendingAction.kind==='entrada'?'compra':pendingAction.kind==='tratamiento'?'aplicación':pendingAction.kind==='revision'?'revisión de almacén':'movimiento'}</h2><button class="btn alt" type="button" id="cancelClientMovement">Cancelar</button></div>${multiForm()}</div>`:''}${content}</div>`}
 function movementTable(arr,withClient=false){
+ arr=arr.filter(m=>m.kind!=='asignacion_lote');
  if(!arr.length)return '<div class="empty">No hay movimientos registrados.</div>';
  const grouped=new Map(),balances=pendingPurchaseState();
  for(const m of arr){
@@ -849,6 +850,8 @@ function movementTable(arr,withClient=false){
    detail='<div class="muted small">Al aplicar: '+esc(fmt(fromStockBase(originallyCovered,p))+' '+stockUnit(p))+' con existencias · '+esc(fmt(fromStockBase(oldDeficit,p))+' '+stockUnit(p))+' por confirmar compra</div>';
    detail+=still>0.000001?'<div class="pill red" style="display:inline-block;margin-top:4px">Pendiente compra: '+esc(fmt(fromStockBase(still,p))+' '+stockUnit(p))+'</div>':'<div class="muted small">Déficit cubierto por compras posteriores</div>';
   }
+  const linkedLotNotes=model.movements.filter(x=>x.kind==='asignacion_lote'&&group.some(m=>m.id===x.pendingMovementId));
+  if(linkedLotNotes.length)detail+='<div class="muted small">Lotes asignados posteriormente: '+esc(linkedLotNotes.map(x=>x.lot+' ('+fmt(fromStockBase(x.lotQtyBase,p))+' '+stockUnit(p)+')').join(' · '))+'</div>';
   if(group.length>1)detail+='<details style="margin-top:5px"><summary class="muted small" style="cursor:pointer">Ver desglose ('+group.length+' líneas)</summary>'+group.map(x=>'<div class="muted small">'+esc(fmt(fromStockBase(Math.abs(movementStockDelta(x,prod(x.productId))),p))+' '+stockUnit(p)+' · '+(x.lot?'Lote '+x.lot:'Sin lote'))+'</div>').join('')+'</details>';
   return '<tr><td>'+esc(m.date)+'</td>'+(withClient?'<td>'+esc(cName(m.customerId))+'</td>':'')
    +'<td><span class="pill '+(m.kind==='tratamiento'?'warn':m.kind==='revision'?'red':'')+'">'+esc(({entrada:'Compra/entrada',tratamiento:'Aplicación',revision:'Ajuste revisión',salida:'Otra salida'})[m.kind]||m.kind)+'</span></td>'
