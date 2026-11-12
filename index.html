@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='60', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='61', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -743,8 +743,8 @@ try{
 const f=new FormData();
 for(const [k,v] of Object.entries({kind:r.kind,customer:r.customerId,product:r.productId,qty:r.qty,qtyUnit:r.qtyUnit,date:r.date||today(),planLine:r.planLineId||'',plot:r.plot||'',area:r.area||'',notes:r.notes||''}))f.append(k,String(v));
 const m=validateMove(f);
-const unit=prod(m.productId).unit;
-const msg=cName(m.customerId)+' · '+pName(m.productId)+'\nOperación: '+m.kind+'\nCantidad: '+fmt(m.qty)+' '+m.qtyUnit+'\nStock anterior: '+fmt(fromBase(m.before,unit))+' '+unit+'\nStock resultante: '+fmt(fromBase(m.after,unit))+' '+unit+(m.after<0?'\nATENCIÓN: stock negativo.':'');
+const product=prod(m.productId),unit=stockUnit(product);
+const msg=cName(m.customerId)+' · '+pName(m.productId)+'\nOperación: '+m.kind+'\nCantidad: '+fmt(m.qty)+' '+m.qtyUnit+'\nStock anterior: '+fmt(fromStockBase(m.before,product))+' '+unit+'\nStock resultante: '+fmt(fromStockBase(m.after,product))+' '+unit+(m.after<0?'\nATENCIÓN: stock negativo.':'');
 if(!confirm(msg+'\n\n¿Guardar este registro?'))return;
 model.movements.push({...m,id:id(),recorded:stamp(),technician:model.tech});
 await save();selected=m.customerId;pendingAction=null;customerTab='historial';navigate('cliente');t('Movimiento registrado desde voz o texto');
@@ -755,10 +755,10 @@ let r=interpret($('command').value);
 if(r.view){out.innerHTML=`<div class="alert good"><b>${esc(cName(r.customerId))}</b><br>${productsFor(r.customerId).map(p=>`${esc(stockDisplayName(p))}: ${stockView(r.customerId,p.id)}`).join('<br>')||'Sin existencias'}</div><button class="btn alt" id="gotoResult">Abrir ficha</button>`;$('gotoResult').onclick=()=>{selected=r.customerId;customerTab='stock';navigate('cliente')}}
 else{
 pendingAction=r;
-const p=prod(r.productId),unit=stockUnit(p),before=stockBase(r.customerId,r.productId);
-const quantity=discreteStock(p)?r.qty:toBase(r.qty,r.qtyUnit);
-const after=r.kind==='revision'?quantity:before+(r.kind==='entrada'?quantity:-quantity);
-out.innerHTML=`<div class="alert good"><b>Orden reconocida: comprueba los datos</b><br>${esc(r.kind)} · ${esc(cName(r.customerId))}<br>${esc(pName(r.productId))} · ${fmt(r.qty)} ${esc(r.qtyUnit)}<br>Stock actual: ${fmt(fromBase(before,unit))} ${esc(unit)}<br><strong>Stock después: ${fmt(fromBase(after,unit))} ${esc(unit)}</strong></div><div class="actions"><button class="btn" id="confirmSpoken">✅ Confirmar y guardar ahora</button><button class="btn alt" id="gotoMovement">✏️ Revisar en formulario</button></div>`;
+const f=new FormData();
+for(const [k,v] of Object.entries({kind:r.kind,customer:r.customerId,product:r.productId,qty:r.qty,qtyUnit:r.qtyUnit,date:r.date||today(),planLine:r.planLineId||'',plot:r.plot||'',area:r.area||'',notes:r.notes||''}))f.append(k,String(v));
+const preview=validateMove(f),p=prod(r.productId),unit=stockUnit(p),before=preview.before,after=preview.after;
+out.innerHTML=`<div class="alert good"><b>Orden reconocida: comprueba los datos</b><br>${esc(r.kind)} · ${esc(cName(r.customerId))}<br>${esc(pName(r.productId))} · ${fmt(r.qty)} ${esc(r.qtyUnit)}<br>Stock actual: ${fmt(fromStockBase(before,p))} ${esc(unit)}<br><strong>Stock después: ${fmt(fromStockBase(after,p))} ${esc(unit)}</strong></div><div class="actions"><button class="btn" id="confirmSpoken">✅ Confirmar y guardar ahora</button><button class="btn alt" id="gotoMovement">✏️ Revisar en formulario</button></div>`;
 $('confirmSpoken').onclick=()=>confirmSpokenMovement(r);
 $('gotoMovement').onclick=()=>{selected=r.customerId||selected;pendingAction={kind:r.kind||'entrada',customerId:selected};if(selected&&cust(selected))navigate('cliente');else navigate('clientes')};
 }
