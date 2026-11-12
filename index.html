@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='95', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='96', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -510,7 +510,7 @@ style.textContent='.ag-combo{position:relative;width:100%}.ag-combo-input{width:
 document.head.appendChild(style);
 }
 for(const sel of [...document.querySelectorAll('select')]){
-if(sel.id==='planLine')continue;
+if(sel.id==='planLine'||sel.name==='lineLot')continue;
 const options=[...sel.options].map(o=>({value:o.value,text:o.text,disabled:o.disabled}));
 const isMain=['product','customer','quickCustomer','shareCustomer'].includes(sel.id)||['lineProduct','product','productId','customer','customerId','quickCustomer','shareCustomer'].includes(sel.name);
 if(!isMain&&options.length<12)continue;
@@ -844,7 +844,7 @@ function updateMultiLotChoices(productRow){
   const select=line.querySelector('[name=lineLot]');if(!select||select.tagName!=='SELECT')continue;
   const own=select.value;
   const taken=new Set(lines.filter(x=>x!==line).map(x=>x.querySelector('[name=lineLot]')?.value?.toLowerCase()).filter(Boolean));
-  const choices='<option value="">Sin lote (opcional)</option>'+lots.filter(x=>x.lot===own||!taken.has(x.lot.toLowerCase())).map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+'</option>').join('');
+  const choices='<option value="">Sin lote (opcional)</option>'+lots.filter(x=>x.lot===own||!taken.has(x.lot.toLowerCase())).map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+' · '+esc(fmt(fromStockBase(x.amount,p))+' '+stockUnit(p))+' disponibles</option>').join('');
   select.innerHTML=choices;
   if(lots.some(x=>x.lot===own))select.value=own;
   select.onchange=()=>{updateMultiLotChoices(productRow);updateMultiPending(productRow);};
@@ -892,7 +892,7 @@ function multiAddRow(){
  const kind=form.multiKind.value,entry=kind==='entrada',revision=kind==='revision',row=document.createElement('div');
  row.className='multi-row filetile';
  row.innerHTML='<div class="row between"><b class="multi-title">Producto '+(target.children.length+1)+'</b><button type="button" class="btn danger multi-remove">Quitar</button></div>'
- +'<div class="field"><label>Producto *</label><select name="lineProduct" required>'+productOptionsForKind(kind,'',selected)+'</select></div>'
+ +'<div class="field"><label>Producto *</label><select name="lineProduct" required>'+productOptionsForKind(kind,'',selected)+'</select><div class="multi-stock-top" aria-live="polite" style="margin-top:7px;font-size:14px;font-weight:700;color:#145443">Selecciona el producto para consultar sus existencias.</div></div>'
  +(entry||revision?'':'<div class="field" style="margin-top:12px"><label>1. Cantidad TOTAL utilizada de este producto *</label><input name="totalUsed" type="number" min="0.000001" step="any" inputmode="decimal" required placeholder="Ej.: 17"></div><div class="multi-pending notice" aria-live="polite" style="position:sticky;top:56px;z-index:5;background:#f4f7ef;color:#145443;font-weight:700;padding:9px 11px;margin:7px 0">Reparto por lotes opcional: indica el total.</div><button type="button" class="btn alt multi-fifo" style="margin-bottom:12px">↧ Repartir automáticamente por antigüedad (FIFO)</button>')
  +'<div class="multi-lot-list stack"></div>'
  +'<button type="button" class="btn alt multi-add-lot" style="margin-top:9px" '+(revision?'hidden':'')+'>＋ Añadir otra línea de '+(entry?'envases':'cantidad')+' y lote</button>'
@@ -907,7 +907,8 @@ function multiAddRow(){
  const refresh=()=>{const p=prod(row.querySelector('[name=lineProduct]').value),wrap=row.querySelector('.multi-pack'),packInput=wrap.querySelector('input');
   const pack=p&&!discreteStock(p)?commercialPack(p):null,needs=!!(entry&&p&&!discreteStock(p)&&!pack);
   wrap.style.display=needs?'':'none';packInput.required=needs;packInput.disabled=!needs;
-  const hint=row.querySelector('.multi-hint');
+  const hint=row.querySelector('.multi-hint'),stockTop=row.querySelector('.multi-stock-top');
+  if(stockTop){const balance=p?stockBase(selected,p.id):0;stockTop.textContent=!p?'Selecciona el producto para consultar sus existencias.':'Existencias actuales: '+stockView(selected,p.id);stockTop.style.color=balance<0?'#ad3527':'#145443';}
   hint.textContent=!p?'Selecciona un producto':entry?(pack?'Formato identificado: '+fmt(pack.size)+' '+p.unit+' por envase. El lote puede dejarse vacío.':'Formato no identificado: rellena el contenido por envase, en '+p.unit+'. El lote es opcional.'):revision?'Existencias actuales: '+stockView(selected,p.id)+'. Introduce el total contado.':'Existencias actuales: '+stockView(selected,p.id)+'. El lote es opcional.';
   for(const line of row.querySelectorAll('.multi-lot-line')){const unit=line.querySelector('[name=lineUnit]');if(p){unit.value=discreteStock(p)?'ud.':p.unit;unit.disabled=entry||discreteStock(p);}}
   updateMultiLotChoices(row);
