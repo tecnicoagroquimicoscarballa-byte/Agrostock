@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='84', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='85', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -552,9 +552,9 @@ function lotSummaryHTML(cid,pid){
  const p=prod(pid),summary=lotSummary(cid,pid);
  if(!p)return '';
  const amount=v=>fmt(fromStockBase(v,p))+' '+stockUnit(p);
- if(!summary.lots.length)return '<div class="notice">No hay movimientos con lote identificado. Las existencias totales siguen disponibles.</div>';
+ if(!summary.lots.length)return '<div class="notice">No hay movimientos con lote identificado. Saldo sin lote: <b>'+esc(amount(summary.unassigned))+'</b>. Consulta el historial para ver las cantidades pendientes de compra y lote.</div>';
  const rows=summary.lots.map(x=>'<tr><td>'+esc(x.lot)+'</td><td><b>'+esc(amount(x.amount))+'</b></td></tr>').join('');
- const unassigned=summary.unassigned?'<tr><td>Movimientos sin lote indicado</td><td><b>'+esc(amount(summary.unassigned))+'</b></td></tr>':'';
+ const unassigned=summary.unassigned?'<tr><td>Movimientos sin lote indicado (incluidos pendientes)</td><td><b>'+esc(amount(summary.unassigned))+'</b></td></tr>':'';
  return '<h3>Desglose por lotes</h3><div class="tablewrap"><table><thead><tr><th>Lote</th><th>Saldo registrado</th></tr></thead><tbody>'+rows+unassigned+'</tbody></table></div><p class="muted small">Las salidas sin lote se contabilizan por separado y no se distribuyen entre lotes sin evidencia. Los saldos negativos por lote requieren revisión.</p>';
 }
 function autoLot(cid,pid,delta){
@@ -707,7 +707,7 @@ function multiAddLotLine(productRow){
  const units=U.map(u=>'<option value="'+esc(u)+'">'+esc(u)+'</option>').join('');
  line.innerHTML='<div style="display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,0.88fr);gap:10px;align-items:start">'
  +'<div class="field" style="min-width:0"><label>Lote (opcional)</label>'+(entry||revision?'<input name="lineLot" type="text" maxlength="100" placeholder="Sin lote">':'<select name="lineLot"><option value="">Lote / FIFO</option></select>')+'</div>'
- +'<div class="field" style="min-width:0"><label class="multi-qty-label">'+label+' *</label><input type="number" name="lineQty" min="'+(revision?'0':entry?'1':'0.000001')+'" step="'+(entry?'1':'any')+'" required inputmode="'+(entry?'numeric':'decimal')+'" placeholder="Cantidad"></div></div>'
+ +'<div class="field" style="min-width:0"><label class="multi-qty-label">'+label+' *</label><input type="number" name="lineQty" min="'+(revision?'0':entry?'1':'0.000001')+'" step="'+(entry?'1':'any')+'" inputmode="'+(entry?'numeric':'decimal')+'" placeholder="Cantidad"></div></div>'
  +(!entry&&!revision?'<div class="multi-lot-available muted small" aria-live="polite" style="margin-top:4px">Selecciona un lote para ver su saldo.</div>':'')
  +'<div class="row between" style="margin-top:5px;gap:8px"><div class="field" style="flex:0 1 130px;min-width:88px"><label>Unidad</label><select name="lineUnit">'+units+'</select></div><button class="btn danger multi-remove-lot" type="button" style="padding:7px 10px;min-height:38px">Quitar</button></div>';
  line.querySelector('.multi-remove-lot').onclick=()=>{if(list.children.length===1){t('Debe quedar al menos una línea por producto.','error');return;}line.remove();updateMultiLotChoices(productRow);updateMultiPending(productRow);};
@@ -743,15 +743,22 @@ async function multiSubmit(e){
     let sum=0;
     for(const line of row.querySelectorAll('.multi-lot-line')){
      const q=line.querySelector('[name=lineQty]').value;
+     const lot=line.querySelector('[name=lineLot]').value.trim();
      const u=line.querySelector('[name=lineUnit]').value;
-     if(!q||!Number.isFinite(Number(q))||Number(q)<=0)throw Error('Producto '+(i+1)+': indica una cantidad positiva en cada lote.');
+     if(!q&&!lot)continue; // Fila adicional vacía: no genera ningún movimiento.
+     if(!q||!Number.isFinite(Number(q))||Number(q)<=0)throw Error('Producto '+(i+1)+': indica una cantidad positiva en cada lote seleccionado.');
      sum+=discreteStock(p)?Number(q):toBase(Number(q),u);
     }
     if(Math.abs(total-sum)>Math.max(0.000001,total*0.00000001))
      throw Error('Producto '+(i+1)+': la suma de lotes no coincide con el total aplicado. Faltan o sobran '+fmt(fromStockBase(Math.abs(total-sum),p))+' '+stockUnit(p)+'.');
    }
   }
-  moves=rows.flatMap((row,i)=>[...row.querySelectorAll('.multi-lot-line')].map((lot,j)=>{try{return multiBuildMove(form,row,lot)}catch(e){throw Error('Producto '+(i+1)+' línea '+(j+1)+': '+e.message)}}));
+  moves=rows.flatMap((row,i)=>{
+   const all=[...row.querySelectorAll('.multi-lot-line')];
+   const filled=all.filter(line=>line.querySelector('[name=lineQty]').value.trim()||line.querySelector('[name=lineLot]').value.trim());
+   if(!filled.length)throw Error('Producto '+(i+1)+': indica al menos una cantidad antes de guardar.');
+   return filled.map((lot,j)=>{try{return multiBuildMove(form,row,lot)}catch(e){throw Error('Producto '+(i+1)+' línea '+(j+1)+': '+e.message)}});
+  });
   if(form.multiKind.value==='revision'){
    const groups=moves.map(m=>stockGroupKey(prod(m.productId)));
    if(new Set(groups).size!==groups.length)throw Error('En una revisión indica cada producto una sola vez.');
