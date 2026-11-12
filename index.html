@@ -590,7 +590,7 @@ function multiAddRow(){
  row.querySelector('.multi-remove').onclick=()=>{row.remove();[...target.children].forEach((el,i)=>el.querySelector('.multi-title').textContent='Producto '+(i+1));};
  row.querySelector('.multi-add-lot').onclick=()=>multiAddPurchaseLot(row);
  const refresh=()=>{const p=prod(row.querySelector('[name=lineProduct]').value),unit=row.querySelector('[name=lineUnit]'),wrap=row.querySelector('.multi-pack'),input=wrap.querySelector('input');
- row.querySelector('.multi-single-fields').hidden=entry;row.querySelector('.multi-single-lot').hidden=entry;row.querySelector('.multi-purchase-lots').hidden=!entry;
+ row.querySelector('.multi-single-fields').style.display=entry?'none':'';row.querySelector('.multi-single-lot').style.display=entry?'none':'';row.querySelector('.multi-purchase-lots').style.display=entry?'':'none';
  row.querySelector('[name=lineQty]').disabled=entry;row.querySelector('[name=lineLot]').disabled=entry;
  if(entry&&!row.querySelector('.multi-purchase-list').children.length)multiAddPurchaseLot(row);unit.value=p?(discreteStock(p)?'ud.':p.unit):'kg';unit.disabled=entry||discreteStock(p);const pack=p&&!discreteStock(p)?commercialPack(p):null;const needs=entry&&p&&!discreteStock(p)&&!pack;wrap.hidden=!needs;input.required=!!needs;input.disabled=!needs;row.querySelector('.multi-hint').textContent=!p?'Selecciona el producto':entry?(pack?'Contenido por envase: '+fmt(pack.size)+' '+p.unit:'Introduce los envases y, si se solicita, su contenido'):revision?'Existencias actuales: '+stockView(selected,p.id)+'. Introduce el total contado.':'Existencias disponibles: '+stockView(selected,p.id);};
  row.querySelector('[name=lineProduct]').onchange=refresh;target.appendChild(row);refresh();
