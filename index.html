@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='85', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='86', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -557,6 +557,56 @@ function lotSummaryHTML(cid,pid){
  const unassigned=summary.unassigned?'<tr><td>Movimientos sin lote indicado (incluidos pendientes)</td><td><b>'+esc(amount(summary.unassigned))+'</b></td></tr>':'';
  return '<h3>Desglose por lotes</h3><div class="tablewrap"><table><thead><tr><th>Lote</th><th>Saldo registrado</th></tr></thead><tbody>'+rows+unassigned+'</tbody></table></div><p class="muted small">Las salidas sin lote se contabilizan por separado y no se distribuyen entre lotes sin evidencia. Los saldos negativos por lote requieren revisión.</p>';
 }
+function availablePurchaseForPending(purchase){
+ const p=prod(purchase.productId);
+ if(!p||purchase.kind!=='entrada'||!purchase.lot)return 0;
+ const used=model.movements.filter(m=>m.linkedPurchaseId===purchase.id).reduce((sum,m)=>sum+Math.abs(movementStockDelta(m,prod(m.productId))),0);
+ const gross=Math.max(0,movementStockDelta(purchase,p)-used);
+ // The batch cannot be assigned to an old pending application if its stock was already used elsewhere.
+ const balance=lotSummary(purchase.customerId,purchase.productId).lots.find(x=>x.lot===purchase.lot)?.amount||0;
+ return Math.max(0,Math.min(gross,balance));
+}
+function eligiblePurchasesForPending(pending){
+ const p=prod(pending.productId);if(!p)return [];
+ const key=stockGroupKey(p);
+ return model.movements.filter(m=>m.kind==='entrada'&&m.customerId===pending.customerId&&!!m.lot&&stockGroupKey(prod(m.productId))===key&&availablePurchaseForPending(m)>0.000001);
+}
+function pendingRegularizationPanel(cid){
+ const pending=model.movements.filter(m=>m.customerId===cid&&m.pendingPurchase&&m.kind==='tratamiento'&&m.delta<0);
+ if(!pending.length)return '';
+ return '<div class="card" style="margin:13px 0;border:1px solid #e4c58a"><h3>Pendiente de confirmar compra y lote</h3><p class="muted small">Registra antes la compra real indicando su lote. Después vincula aquí la parte aplicada. Si compraste más de lo pendiente, el resto permanece en existencias. El tratamiento NO se descuenta de nuevo.</p>'
+ +pending.map(m=>{
+  const p=prod(m.productId),options=eligiblePurchasesForPending(m),amount=Math.abs(m.delta);
+  return '<div class="filetile" style="margin-top:10px"><b>'+esc(stockDisplayName(p))+'</b> · Aplicación '+esc(m.date)+'<p class="small">Pendiente: <b>'+esc(fmt(fromStockBase(amount,p))+' '+stockUnit(p))+'</b></p>'
+   +(options.length?'<form class="regularize-pending-form stack" data-pending-id="'+esc(m.id)+'"><div class="field"><label>Compra y lote para justificar el consumo</label><select name="purchaseId" required>'+options.map(x=>{
+    const free=availablePurchaseForPending(x);
+    return '<option value="'+esc(x.id)+'">'+esc(x.date+' · Lote '+x.lot+' · compra '+fmt(fromStockBase(movementStockDelta(x,prod(x.productId)),p))+' '+stockUnit(p)+' · disponible para vincular '+fmt(fromStockBase(free,p))+' '+stockUnit(p))+'</option>';
+   }).join('')+'</select></div><button type="submit" class="btn">Vincular compra y asignar lote</button></form>'
+   :'<div class="notice">No hay una compra con lote y saldo suficiente para vincular. Registra una compra o comprueba sus existencias.</div>')
+   +'</div>';
+ }).join('')+'</div>';
+}
+async function regularizePendingApplication(e){
+ e.preventDefault();
+ const form=e.target,m=model.movements.find(x=>x.id===form.dataset.pendingId);
+ const purchase=model.movements.find(x=>x.id===form.querySelector('[name=purchaseId]').value);
+ if(!m||!m.pendingPurchase||m.kind!=='tratamiento'||!purchase)return t('Ya no existe este pendiente o la compra seleccionada.','error');
+ if(!eligiblePurchasesForPending(m).some(x=>x.id===purchase.id))return t('La compra ya no está disponible para este pendiente.','error');
+ const needed=Math.abs(m.delta),free=availablePurchaseForPending(purchase),take=Math.min(needed,free);
+ if(take<=0.000001)return t('El lote de la compra no tiene saldo disponible.','error');
+ const p=prod(m.productId),remainder=needed-take;
+ const msg='Compra: '+fmt(fromStockBase(movementStockDelta(purchase,prod(purchase.productId)),p))+' '+stockUnit(p)+' · lote '+purchase.lot+
+ '\\nAsignar al tratamiento pendiente: '+fmt(fromStockBase(take,p))+' '+stockUnit(p)+
+ (remainder>0.000001?'\\nContinuará pendiente: '+fmt(fromStockBase(remainder,p))+' '+stockUnit(p):'')+
+ '\\nEl stock TOTAL no cambia al vincular. El excedente de la compra sigue disponible. ¿Confirmas?';
+ if(!confirm(msg))return;
+ const original={...m},before=model.movements.length;
+ const updated={...m,delta:-take,qty:discreteStock(p)?take:fromBase(take,m.qtyUnit),lot:purchase.lot,pendingPurchase:false,pendingLot:false,pendingReason:'',linkedPurchaseId:purchase.id,regularizedAt:stamp()};
+ const residual=remainder>0.000001?{...m,id:id(),delta:-remainder,qty:discreteStock(p)?remainder:fromBase(remainder,m.qtyUnit),lot:'',pendingPurchase:true,pendingLot:true,linkedPurchaseId:null}:null;
+ const index=model.movements.indexOf(m);model.movements[index]=updated;if(residual)model.movements.push(residual);
+ try{await save();}catch(err){model.movements[index]=original;model.movements.length=before;return t('No se pudo guardar la regularización: '+err.message,'error');}
+ render();t('Compra y lote vinculados; sin descontar de nuevo el tratamiento.');
+}
 function autoLot(cid,pid,delta){
  const summary=lotSummary(cid,pid),positive=summary.lots.filter(x=>x.amount>0.000001);
  return summary.unassigned===0&&positive.length===1&&positive[0].amount>=-delta?positive[0].lot:'';
@@ -568,15 +618,15 @@ function stockProductHistory(cid,pid){
  return `<div class="card" id="stockProductHistory" style="margin-top:14px"><div class="row between"><div><h3>Movimientos de ${esc(stockDisplayName(product))}</h3><p class="muted small">${rows.length} movimientos · Existencias actuales: <b>${esc(stockView(cid,pid))}</b></p></div><button class="btn alt" type="button" id="closeStockHistory">Cerrar</button></div>${lotSummaryHTML(cid,pid)}${movementTable(rows)}</div>`;
 }
 function detail(){let c=cust(selected);if(!c)return `<div class="alert">Cliente no encontrado.</div>`;let tabs=[['stock','Existencias'],['historial','Historial'],['tratamientos','Aplicaciones'],['planes','Plan abonado'],['documentos','Documentos'],['visitas','Visitas'],['pedidos','Pedidos'],['alertas','Alertas']];let content='';if(customerTab==='stock'){let p=productsFor(c.id);content=p.length?`<p class="muted small">Pulsa un producto para consultar solo sus compras, aplicaciones y revisiones.</p><div class="tablewrap"><table><thead><tr><th>Producto</th><th>Unidad</th><th>Existencias</th><th>Estado</th></tr></thead><tbody>${p.map(x=>{let amount=stockBase(c.id,x.id);return `<tr><td><button type="button" class="btn alt" data-stock-history="${esc(x.id)}" style="text-align:left;padding:7px 10px">${esc(stockDisplayName(x))} ▸</button><div class="muted small">${esc(catLabel(x.category))}</div></td><td>${esc(stockUnit(x))}</td><td><b>${stockView(c.id,x.id)}</b></td><td><span class="pill ${amount<0?'red':amount===0?'warn':''}">${amount<0?'Negativo · compra pendiente':amount===0?'Agotado':'Disponible'}</span></td></tr>`}).join('')}</tbody></table></div>${stockHistoryProductId&&p.some(x=>x.id===stockHistoryProductId)?stockProductHistory(c.id,stockHistoryProductId):''}`:'<div class="empty">Sin existencias registradas todavía.</div>'}
-else if(customerTab==='historial')content=movementTable(model.movements.filter(x=>x.customerId===c.id).slice().reverse());
-else if(customerTab==='tratamientos')content=movementTable(model.movements.filter(x=>x.customerId===c.id&&x.kind==='tratamiento').slice().reverse());
+else if(customerTab==='historial')content=pendingRegularizationPanel(c.id)+movementTable(model.movements.filter(x=>x.customerId===c.id).slice().reverse());
+else if(customerTab==='tratamientos')content=pendingRegularizationPanel(c.id)+movementTable(model.movements.filter(x=>x.customerId===c.id&&x.kind==='tratamiento').slice().reverse());
 else if(customerTab==='planes')content=clientPlansPanel(c.id);
     else if(customerTab==='visitas')content=visitsList(c.id);
     else if(customerTab==='pedidos')content=ordersList(c.id);
     else if(customerTab==='alertas')content=alertsList(c.id);
 else{let docs=model.documents.filter(x=>x.customerId===c.id);content=docs.length?docs.map(d=>documentTile(d)).join(''):'<div class="empty">Sin fotografías archivadas.</div>'}
 return `<div class="row between"><div>${head(esc(c.commercialName||c.name),[c.ref,c.place].filter(Boolean).map(esc).join(' · '))}</div><button class="btn alt" data-nav="clientes">← Clientes</button></div><div class="card">${c.phone||c.email||c.lastPurchase?`<p class="muted small">Contacto: ${esc(c.phone||"—")}${c.phone2?" · "+esc(c.phone2):""}${c.email?" · "+esc(c.email):""}${c.lastPurchase?" · Última venta Carballa: "+esc(c.lastPurchase):""}</p>`:""}<div class="actions" style="margin:0 0 13px">${clientArchived(c.id)?'<span class="pill warn">Cliente dado de baja · solo consulta de historial</span>':'<button class="btn" data-add="entrada">+ Compra</button>'}${clientArchived(c.id)?'':'<button class="btn" data-add="tratamiento">− Aplicación</button><button class="btn alt" data-add="revision">⌕ Revisión</button><button class="btn alt" data-add="salida">− Otra salida</button>'}<button class="btn alt" data-client-plan="1">🌿 Plan de abonado</button><button class="btn alt" data-export-client="${c.id}">Compartir cliente</button><button class="btn alt" data-nav="documentos">📷 Fotografía</button><button class="btn alt" data-nav="visitas">📝 Visita</button><button class="btn alt" data-nav="pedidos">🛒 Pedido</button><button class="btn alt" data-nav="alertas">⏰ Alertas</button><button class="btn alt" data-client-status="${c.id}" data-archived="${clientArchived(c.id)?'0':'1'}">${clientArchived(c.id)?'↩ Reactivar cliente':'Archivar / dar de baja'}</button></div><div class="tabs">${tabs.map(([s,n])=>`<button class="${customerTab===s?'selected':''}" data-ctab="${s}">${n}</button>`).join('')}</div>${pendingAction&&pendingAction.customerId===c.id?`<div class="card" id="activeMovementPanel" style="margin:14px 0;scroll-margin-top:78px"><div class="row between"><h2>Registrar ${pendingAction.kind==='entrada'?'compra':pendingAction.kind==='tratamiento'?'aplicación':pendingAction.kind==='revision'?'revisión de almacén':'movimiento'}</h2><button class="btn alt" type="button" id="cancelClientMovement">Cancelar</button></div>${multiForm()}</div>`:''}${content}</div>`}
-function movementTable(arr,withClient=false){if(!arr.length)return '<div class="empty">No hay movimientos registrados.</div>';return `<div class="tablewrap"><table><thead><tr><th>Fecha</th>${withClient?'<th>Cliente</th>':''}<th>Operación</th><th>Producto</th><th>Cantidad</th><th>Lote</th><th>Notas</th></tr></thead><tbody>${arr.map(m=>`<tr><td>${esc(m.date)}</td>${withClient?`<td>${esc(cName(m.customerId))}</td>`:''}<td><span class="pill ${m.kind==='tratamiento'?'warn':m.kind==='revision'?'red':''}">${({entrada:'Compra/entrada',tratamiento:'Aplicación',revision:'Ajuste revisión',salida:'Otra salida'})[m.kind]||esc(m.kind)}</span></td><td>${esc(m.kind==='entrada'?pName(m.productId):stockDisplayName(prod(m.productId)))}</td><td><b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?esc(discreteStock(prod(m.productId))?fmt(m.packCount)+' '+stockUnit(prod(m.productId))+' (formato comercial)':fmt(m.packCount)+' envase'+(m.packCount===1?'':'s')+(m.packSize?' × '+fmt(m.packSize)+' '+(prod(m.productId)?.unit||m.qtyUnit):'')):signed(m)}</b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?'<div class="muted small">Total almacén: '+esc(signed(m))+'</div>':''}</td><td class="small">${esc(m.lot||'—')}${m.pendingPurchase?'<div class="pill red" style="margin-top:4px">Pendiente de confirmar compra y asignar lote</div>':''}</td><td class="small">${esc(m.notes||'')}${m.plot?` · Parcela: ${esc(m.plot)}`:''}${m.area?` · ${fmt(m.area)} ha`:''}</td></tr>`).join('')}</tbody></table></div>`}
+function movementTable(arr,withClient=false){if(!arr.length)return '<div class="empty">No hay movimientos registrados.</div>';return `<div class="tablewrap"><table><thead><tr><th>Fecha</th>${withClient?'<th>Cliente</th>':''}<th>Operación</th><th>Producto</th><th>Cantidad</th><th>Lote</th><th>Notas</th></tr></thead><tbody>${arr.map(m=>`<tr><td>${esc(m.date)}</td>${withClient?`<td>${esc(cName(m.customerId))}</td>`:''}<td><span class="pill ${m.kind==='tratamiento'?'warn':m.kind==='revision'?'red':''}">${({entrada:'Compra/entrada',tratamiento:'Aplicación',revision:'Ajuste revisión',salida:'Otra salida'})[m.kind]||esc(m.kind)}</span></td><td>${esc(m.kind==='entrada'?pName(m.productId):stockDisplayName(prod(m.productId)))}</td><td><b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?esc(discreteStock(prod(m.productId))?fmt(m.packCount)+' '+stockUnit(prod(m.productId))+' (formato comercial)':fmt(m.packCount)+' envase'+(m.packCount===1?'':'s')+(m.packSize?' × '+fmt(m.packSize)+' '+(prod(m.productId)?.unit||m.qtyUnit):'')):signed(m)}</b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?'<div class="muted small">Total almacén: '+esc(signed(m))+'</div>':''}</td><td class="small">${esc(m.lot||'—')}${m.pendingPurchase?'<div class="pill red" style="margin-top:4px">Pendiente de confirmar compra y asignar lote</div>':m.linkedPurchaseId?'<div class="pill" style="margin-top:4px">Regularizado con compra</div>':''}</td><td class="small">${esc(m.notes||'')}${m.plot?` · Parcela: ${esc(m.plot)}`:''}${m.area?` · ${fmt(m.area)} ha`:''}</td></tr>`).join('')}</tbody></table></div>`}
 function productsScreen(){return `${head('Productos','Gestiona tus productos incorporados y consulta el catálogo Carballa.')}<div class="grid"><div class="full card">${myProductsPanel()}</div><div class="full card"><h2>Catálogo de productos</h2><p class="muted">Busca en Carballa, consulta los ocultos o crea manualmente un artículo de otro proveedor.</p>${productCatalogList()}<details style="margin-top:18px"><summary style="cursor:pointer;font-weight:700">＋ Añadir producto manualmente (fuera de Carballa)</summary><div style="margin-top:12px"><form id="createProduct" class="stack">${input('Nombre comercial *','name','text','','required maxlength="150"')}${select('Categoría *','category',[['fitosanitario','Fitosanitario'],['fertilizante','Fertilizante'],['enmienda','Enmienda'],['difusor','Difusor'],['semillas','Semillas (stock en envases)'],['material','Material y artículos por unidades'],['otro','Otro']].map(([v,l])=>`<option value="${v}">${l}</option>`).join(''))}${select('Unidad de stock *','unit',U.map(x=>`<option value="${x}">${x}</option>`).join(''))}${input('Nº registro MAPA (fitosanitarios)','registration','text','','maxlength="30"')}<button class="btn">Añadir producto manualmente</button></form></div></details><div class="notice">Los formatos comerciales distintos se mantienen como artículos separados. El stock se contabiliza en unidades reales.</div></div></div>`}
 function movementScreen(){return selected&&cust(selected)?detail():customersScreen()}
 
@@ -1189,6 +1239,7 @@ document.querySelectorAll('[data-customer-import]').forEach(b=>b.onclick=()=>inc
 const cdSearch=$('clientDirectorySearch');if(cdSearch)cdSearch.oninput=e=>{customerDirectoryFilter=e.target.value;const pos=e.target.selectionStart;render();const n=$('clientDirectorySearch');if(n){n.focus();n.setSelectionRange(pos,pos)}};
 const dirFile=$('directoryCustomersImport');if(dirFile)dirFile.onchange=async e=>{try{if(e.target.files?.[0])await importCustomerDirectory(e.target.files[0])}catch(err){t(err.message,'error');alert('No se ha importado el directorio: '+err.message)}};
 
+document.querySelectorAll('.regularize-pending-form').forEach(f=>f.onsubmit=regularizePendingApplication);
 const mySearch=$('myProductSearch');if(mySearch)mySearch.oninput=e=>{myProductFilter=e.target.value;const pos=e.target.selectionStart;render();const field=$('myProductSearch');if(field){field.focus();field.setSelectionRange(pos,pos)}};
 const catalogSearch=$('productCatalogSearch');
 if(catalogSearch)catalogSearch.oninput=e=>{const v=e.target.value,pos=e.target.selectionStart;productFilter=v;render();const fresh=$('productCatalogSearch');if(fresh){fresh.focus();fresh.setSelectionRange(pos,pos)}};
