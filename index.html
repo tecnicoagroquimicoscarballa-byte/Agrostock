@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='91', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='92', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -160,6 +160,21 @@ t('Datos de prueba eliminados');
 }catch(e){syncMessage='Reinicio no completado: '+e.message;t(syncMessage,'error');console.error(e);}
 finally{syncBusy=false;render();}
 }
+// An existing pending movement may have been split into one or more linked lots.
+// Treat only that explicitly recorded transition as safe: never silently merge
+// unrelated edits, different allocations, or concurrent customer/product changes.
+function syncRegularizedSuccessor(a,b){
+ if(!a||!b||!a.id||a.id!==b.id)return null;
+ const pending=a.pendingPurchase===true?a:b.pendingPurchase===true?b:null;
+ const linked=a.pendingPurchase===false&&a.linkedPurchaseId&&a.regularizedAt?a:b.pendingPurchase===false&&b.linkedPurchaseId&&b.regularizedAt?b:null;
+ if(!pending||!linked||pending===linked)return null;
+ if(!['tratamiento','salida'].includes(pending.kind)||linked.kind!==pending.kind)return null;
+ if(!(Number(pending.delta)<0&&Number(linked.delta)<0&&Number(linked.delta)>=Number(pending.delta)-0.000001))return null;
+ const unchanged=['id','customerId','productId','kind','date','operationId','recorded','technician','plot','area','notes','qtyUnit','planLine','before'];
+ for(const field of unchanged)if(JSON.stringify(pending[field]??null)!==JSON.stringify(linked[field]??null))return null;
+ if(pending.lot||!linked.lot||!linked.linkedPurchaseId)return null;
+ return linked;
+}
 function mergeCloud(local,cloud){
 ensure(local);ensure(cloud);
 const out={...local};let conflicts=[];
@@ -170,12 +185,17 @@ if(!obj||!obj.id)throw Error('Registro remoto sin ID en '+key);
 if(!byId.has(obj.id)){byId.set(obj.id,own.length);own.push(obj);}
 else{
 const stable=x=>JSON.stringify(x,function(k,v){if(v&&typeof v==='object'&&!Array.isArray(v)){return Object.keys(v).sort().reduce((o,key)=>(o[key]=v[key],o),{});}return v;});
-if(stable(own[byId.get(obj.id)])!==stable(obj))conflicts.push(key+'/'+obj.id);
+const existing=own[byId.get(obj.id)];
+if(stable(existing)!==stable(obj)){
+ const resolved=key==='movements'?syncRegularizedSuccessor(existing,obj):null;
+ if(resolved)own[byId.get(obj.id)]={...resolved};
+ else conflicts.push(key+'/'+obj.id);
+}
 }
 }
 out[key]=own;
 }
-if(conflicts.length)throw Error('Versiones distintas del mismo registro: '+conflicts.slice(0,2).join(', ')+'. No se modificó ningún dato.');
+if(conflicts.length)throw Error('Versiones distintas del mismo registro: '+conflicts.slice(0,2).join(', ')+'. No se modificó ningún dato. Descarga una copia de seguridad local antes de cualquier corrección.');
 if(out.customers.filter(c=>!clientArchived(c.id,out)).length>100)throw Error('La unión supera 100 clientes activos; no se modificó ningún dato.');
 return out;
 }
