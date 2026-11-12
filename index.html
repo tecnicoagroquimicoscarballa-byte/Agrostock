@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='88', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='89', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -572,9 +572,9 @@ function eligiblePurchasesForPending(pending){
  return model.movements.filter(m=>m.kind==='entrada'&&m.customerId===pending.customerId&&!!m.lot&&stockGroupKey(prod(m.productId))===key&&availablePurchaseForPending(m)>0.000001);
 }
 function pendingRegularizationPanel(cid){
- const pending=model.movements.filter(m=>m.customerId===cid&&m.pendingPurchase&&m.kind==='tratamiento'&&m.delta<0);
+ const pending=model.movements.filter(m=>m.customerId===cid&&m.pendingPurchase&&['tratamiento','salida'].includes(m.kind)&&m.delta<0);
  if(!pending.length)return '';
- return '<div class="card" style="margin:13px 0;border:1px solid #e4c58a"><h3>Aplicaciones pendientes de regularizar</h3><p class="muted small">Selecciona una o varias compras y reparte entre sus lotes la cantidad pendiente. El tratamiento no se descuenta de nuevo. La parte no vinculada seguirá pendiente.</p>'
+ return '<div class="card" style="margin:13px 0;border:1px solid #e4c58a"><h3>Movimientos pendientes de regularizar</h3><p class="muted small">Selecciona una o varias compras y reparte entre sus lotes la cantidad pendiente. El tratamiento no se descuenta de nuevo. La parte no vinculada seguirá pendiente.</p>'
  +pending.map(m=>{
   const p=prod(m.productId),options=eligiblePurchasesForPending(m),amount=Math.abs(m.delta);
   return '<div class="filetile" style="margin-top:10px"><b>'+esc(stockDisplayName(p))+'</b> · Aplicación '+esc(m.date)+'<p class="small">Por regularizar: <b>'+esc(fmt(fromStockBase(amount,p))+' '+stockUnit(p))+'</b></p>'
@@ -630,7 +630,7 @@ function addRegularizationLotRow(form){
 async function regularizePendingApplication(e){
  e.preventDefault();
  const form=e.target,info=regularizationRowInfo(form);
- if(!info||!info.m.pendingPurchase||info.m.kind!=='tratamiento')return t('El pendiente ya no está disponible.','error');
+ if(!info||!info.m.pendingPurchase||!['tratamiento','salida'].includes(info.m.kind))return t('El pendiente ya no está disponible.','error');
  const {m,p,needed,options}=info,lines=[...form.querySelectorAll('.regularize-lot-row')];
  if(!lines.length)return t('Añade al menos una compra y lote.','error');
  const allocations=[],usedPurchases=new Set(),byLot=new Map();
