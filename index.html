@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='83', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='84', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -441,9 +441,9 @@ function productOptionsForKind(kind,selectedId='',customerId=''){
  const purchase=kind==='entrada',items=model.products.filter(p=>(productActivated(p.id)&&!productHidden(p.id))||p.id===selectedId).sort((a,b)=>a.name.localeCompare(b.name));
  if(purchase)return '<option value="">Selecciona una presentación comercial</option>'+items.map(p=>`<option value="${esc(p.id)}" ${p.id===selectedId?'selected':''}>${esc(p.name)} (${esc(stockUnit(p))})${p.code?' · Ref. '+esc(p.code):''}</option>`).join('');
  const limited=['tratamiento','salida'].includes(kind)&&!!customerId;
- const grouped=new Map();for(const p of items){const key=stockGroupKey(p);if(limited&&stockBase(customerId,p.id)<=0.000001)continue;if(!grouped.has(key))grouped.set(key,p);}
+ const grouped=new Map();for(const p of items){const key=stockGroupKey(p);if(limited&&!model.movements.some(m=>m.customerId===customerId&&stockGroupKey(prod(m.productId))===key))continue;if(!grouped.has(key))grouped.set(key,p);}
  const selected=prod(selectedId),chosen=selected?grouped.get(stockGroupKey(selected))?.id:'';
- return '<option value="">'+(limited?'Selecciona un producto con existencias':'Selecciona un producto (sin presentación)')+'</option>'+[...grouped.values()].sort((a,b)=>stockProductName(a).localeCompare(stockProductName(b))).map(p=>`<option value="${esc(p.id)}" ${p.id===chosen?'selected':''}>${esc(stockDisplayName(p))} (${esc(stockUnit(p))})</option>`).join('');
+ return '<option value="">'+(limited?'Selecciona un producto del cliente':'Selecciona un producto (sin presentación)')+'</option>'+[...grouped.values()].sort((a,b)=>stockProductName(a).localeCompare(stockProductName(b))).map(p=>`<option value="${esc(p.id)}" ${p.id===chosen?'selected':''}>${esc(stockDisplayName(p))} (${esc(stockUnit(p))})</option>`).join('');
 }
 function stockView(cid,pid){const p=prod(pid);return p?fmt(fromStockBase(stockBase(cid,pid),p))+' '+stockUnit(p):'—'}
 function signed(m){let p=prod(m.productId);if(!p)return '';let value=fromStockBase(movementStockDelta(m,p),p);return (value>0?'+':'')+fmt(value)+' '+stockUnit(p)}
@@ -567,7 +567,7 @@ function stockProductHistory(cid,pid){
  const rows=model.movements.filter(m=>m.customerId===cid&&stockGroupKey(prod(m.productId))===key).slice().reverse();
  return `<div class="card" id="stockProductHistory" style="margin-top:14px"><div class="row between"><div><h3>Movimientos de ${esc(stockDisplayName(product))}</h3><p class="muted small">${rows.length} movimientos · Existencias actuales: <b>${esc(stockView(cid,pid))}</b></p></div><button class="btn alt" type="button" id="closeStockHistory">Cerrar</button></div>${lotSummaryHTML(cid,pid)}${movementTable(rows)}</div>`;
 }
-function detail(){let c=cust(selected);if(!c)return `<div class="alert">Cliente no encontrado.</div>`;let tabs=[['stock','Existencias'],['historial','Historial'],['tratamientos','Aplicaciones'],['planes','Plan abonado'],['documentos','Documentos'],['visitas','Visitas'],['pedidos','Pedidos'],['alertas','Alertas']];let content='';if(customerTab==='stock'){let p=productsFor(c.id);content=p.length?`<p class="muted small">Pulsa un producto para consultar solo sus compras, aplicaciones y revisiones.</p><div class="tablewrap"><table><thead><tr><th>Producto</th><th>Unidad</th><th>Existencias</th><th>Estado</th></tr></thead><tbody>${p.map(x=>{let amount=stockBase(c.id,x.id);return `<tr><td><button type="button" class="btn alt" data-stock-history="${esc(x.id)}" style="text-align:left;padding:7px 10px">${esc(stockDisplayName(x))} ▸</button><div class="muted small">${esc(catLabel(x.category))}</div></td><td>${esc(stockUnit(x))}</td><td><b>${stockView(c.id,x.id)}</b></td><td><span class="pill ${amount<0?'red':amount===0?'warn':''}">${amount<0?'Negativo':amount===0?'Agotado':'Disponible'}</span></td></tr>`}).join('')}</tbody></table></div>${stockHistoryProductId&&p.some(x=>x.id===stockHistoryProductId)?stockProductHistory(c.id,stockHistoryProductId):''}`:'<div class="empty">Sin existencias registradas todavía.</div>'}
+function detail(){let c=cust(selected);if(!c)return `<div class="alert">Cliente no encontrado.</div>`;let tabs=[['stock','Existencias'],['historial','Historial'],['tratamientos','Aplicaciones'],['planes','Plan abonado'],['documentos','Documentos'],['visitas','Visitas'],['pedidos','Pedidos'],['alertas','Alertas']];let content='';if(customerTab==='stock'){let p=productsFor(c.id);content=p.length?`<p class="muted small">Pulsa un producto para consultar solo sus compras, aplicaciones y revisiones.</p><div class="tablewrap"><table><thead><tr><th>Producto</th><th>Unidad</th><th>Existencias</th><th>Estado</th></tr></thead><tbody>${p.map(x=>{let amount=stockBase(c.id,x.id);return `<tr><td><button type="button" class="btn alt" data-stock-history="${esc(x.id)}" style="text-align:left;padding:7px 10px">${esc(stockDisplayName(x))} ▸</button><div class="muted small">${esc(catLabel(x.category))}</div></td><td>${esc(stockUnit(x))}</td><td><b>${stockView(c.id,x.id)}</b></td><td><span class="pill ${amount<0?'red':amount===0?'warn':''}">${amount<0?'Negativo · compra pendiente':amount===0?'Agotado':'Disponible'}</span></td></tr>`}).join('')}</tbody></table></div>${stockHistoryProductId&&p.some(x=>x.id===stockHistoryProductId)?stockProductHistory(c.id,stockHistoryProductId):''}`:'<div class="empty">Sin existencias registradas todavía.</div>'}
 else if(customerTab==='historial')content=movementTable(model.movements.filter(x=>x.customerId===c.id).slice().reverse());
 else if(customerTab==='tratamientos')content=movementTable(model.movements.filter(x=>x.customerId===c.id&&x.kind==='tratamiento').slice().reverse());
 else if(customerTab==='planes')content=clientPlansPanel(c.id);
@@ -576,7 +576,7 @@ else if(customerTab==='planes')content=clientPlansPanel(c.id);
     else if(customerTab==='alertas')content=alertsList(c.id);
 else{let docs=model.documents.filter(x=>x.customerId===c.id);content=docs.length?docs.map(d=>documentTile(d)).join(''):'<div class="empty">Sin fotografías archivadas.</div>'}
 return `<div class="row between"><div>${head(esc(c.commercialName||c.name),[c.ref,c.place].filter(Boolean).map(esc).join(' · '))}</div><button class="btn alt" data-nav="clientes">← Clientes</button></div><div class="card">${c.phone||c.email||c.lastPurchase?`<p class="muted small">Contacto: ${esc(c.phone||"—")}${c.phone2?" · "+esc(c.phone2):""}${c.email?" · "+esc(c.email):""}${c.lastPurchase?" · Última venta Carballa: "+esc(c.lastPurchase):""}</p>`:""}<div class="actions" style="margin:0 0 13px">${clientArchived(c.id)?'<span class="pill warn">Cliente dado de baja · solo consulta de historial</span>':'<button class="btn" data-add="entrada">+ Compra</button>'}${clientArchived(c.id)?'':'<button class="btn" data-add="tratamiento">− Aplicación</button><button class="btn alt" data-add="revision">⌕ Revisión</button><button class="btn alt" data-add="salida">− Otra salida</button>'}<button class="btn alt" data-client-plan="1">🌿 Plan de abonado</button><button class="btn alt" data-export-client="${c.id}">Compartir cliente</button><button class="btn alt" data-nav="documentos">📷 Fotografía</button><button class="btn alt" data-nav="visitas">📝 Visita</button><button class="btn alt" data-nav="pedidos">🛒 Pedido</button><button class="btn alt" data-nav="alertas">⏰ Alertas</button><button class="btn alt" data-client-status="${c.id}" data-archived="${clientArchived(c.id)?'0':'1'}">${clientArchived(c.id)?'↩ Reactivar cliente':'Archivar / dar de baja'}</button></div><div class="tabs">${tabs.map(([s,n])=>`<button class="${customerTab===s?'selected':''}" data-ctab="${s}">${n}</button>`).join('')}</div>${pendingAction&&pendingAction.customerId===c.id?`<div class="card" id="activeMovementPanel" style="margin:14px 0;scroll-margin-top:78px"><div class="row between"><h2>Registrar ${pendingAction.kind==='entrada'?'compra':pendingAction.kind==='tratamiento'?'aplicación':pendingAction.kind==='revision'?'revisión de almacén':'movimiento'}</h2><button class="btn alt" type="button" id="cancelClientMovement">Cancelar</button></div>${multiForm()}</div>`:''}${content}</div>`}
-function movementTable(arr,withClient=false){if(!arr.length)return '<div class="empty">No hay movimientos registrados.</div>';return `<div class="tablewrap"><table><thead><tr><th>Fecha</th>${withClient?'<th>Cliente</th>':''}<th>Operación</th><th>Producto</th><th>Cantidad</th><th>Lote</th><th>Notas</th></tr></thead><tbody>${arr.map(m=>`<tr><td>${esc(m.date)}</td>${withClient?`<td>${esc(cName(m.customerId))}</td>`:''}<td><span class="pill ${m.kind==='tratamiento'?'warn':m.kind==='revision'?'red':''}">${({entrada:'Compra/entrada',tratamiento:'Aplicación',revision:'Ajuste revisión',salida:'Otra salida'})[m.kind]||esc(m.kind)}</span></td><td>${esc(m.kind==='entrada'?pName(m.productId):stockDisplayName(prod(m.productId)))}</td><td><b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?esc(discreteStock(prod(m.productId))?fmt(m.packCount)+' '+stockUnit(prod(m.productId))+' (formato comercial)':fmt(m.packCount)+' envase'+(m.packCount===1?'':'s')+(m.packSize?' × '+fmt(m.packSize)+' '+(prod(m.productId)?.unit||m.qtyUnit):'')):signed(m)}</b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?'<div class="muted small">Total almacén: '+esc(signed(m))+'</div>':''}</td><td class="small">${esc(m.lot||'—')}</td><td class="small">${esc(m.notes||'')}${m.plot?` · Parcela: ${esc(m.plot)}`:''}${m.area?` · ${fmt(m.area)} ha`:''}</td></tr>`).join('')}</tbody></table></div>`}
+function movementTable(arr,withClient=false){if(!arr.length)return '<div class="empty">No hay movimientos registrados.</div>';return `<div class="tablewrap"><table><thead><tr><th>Fecha</th>${withClient?'<th>Cliente</th>':''}<th>Operación</th><th>Producto</th><th>Cantidad</th><th>Lote</th><th>Notas</th></tr></thead><tbody>${arr.map(m=>`<tr><td>${esc(m.date)}</td>${withClient?`<td>${esc(cName(m.customerId))}</td>`:''}<td><span class="pill ${m.kind==='tratamiento'?'warn':m.kind==='revision'?'red':''}">${({entrada:'Compra/entrada',tratamiento:'Aplicación',revision:'Ajuste revisión',salida:'Otra salida'})[m.kind]||esc(m.kind)}</span></td><td>${esc(m.kind==='entrada'?pName(m.productId):stockDisplayName(prod(m.productId)))}</td><td><b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?esc(discreteStock(prod(m.productId))?fmt(m.packCount)+' '+stockUnit(prod(m.productId))+' (formato comercial)':fmt(m.packCount)+' envase'+(m.packCount===1?'':'s')+(m.packSize?' × '+fmt(m.packSize)+' '+(prod(m.productId)?.unit||m.qtyUnit):'')):signed(m)}</b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?'<div class="muted small">Total almacén: '+esc(signed(m))+'</div>':''}</td><td class="small">${esc(m.lot||'—')}${m.pendingPurchase?'<div class="pill red" style="margin-top:4px">Pendiente de confirmar compra y asignar lote</div>':''}</td><td class="small">${esc(m.notes||'')}${m.plot?` · Parcela: ${esc(m.plot)}`:''}${m.area?` · ${fmt(m.area)} ha`:''}</td></tr>`).join('')}</tbody></table></div>`}
 function productsScreen(){return `${head('Productos','Gestiona tus productos incorporados y consulta el catálogo Carballa.')}<div class="grid"><div class="full card">${myProductsPanel()}</div><div class="full card"><h2>Catálogo de productos</h2><p class="muted">Busca en Carballa, consulta los ocultos o crea manualmente un artículo de otro proveedor.</p>${productCatalogList()}<details style="margin-top:18px"><summary style="cursor:pointer;font-weight:700">＋ Añadir producto manualmente (fuera de Carballa)</summary><div style="margin-top:12px"><form id="createProduct" class="stack">${input('Nombre comercial *','name','text','','required maxlength="150"')}${select('Categoría *','category',[['fitosanitario','Fitosanitario'],['fertilizante','Fertilizante'],['enmienda','Enmienda'],['difusor','Difusor'],['semillas','Semillas (stock en envases)'],['material','Material y artículos por unidades'],['otro','Otro']].map(([v,l])=>`<option value="${v}">${l}</option>`).join(''))}${select('Unidad de stock *','unit',U.map(x=>`<option value="${x}">${x}</option>`).join(''))}${input('Nº registro MAPA (fitosanitarios)','registration','text','','maxlength="30"')}<button class="btn">Añadir producto manualmente</button></form></div></details><div class="notice">Los formatos comerciales distintos se mantienen como artículos separados. El stock se contabiliza en unidades reales.</div></div></div>`}
 function movementScreen(){return selected&&cust(selected)?detail():customersScreen()}
 
@@ -593,18 +593,18 @@ function updateMultiLotQuantityHint(productRow,line){
  const found=chosen?summary.lots.find(x=>x.lot===chosen):null;
  const shownUnit=unit.value||stockUnit(p);
  if(!found){
-  qty.removeAttribute('max');qty.placeholder='Introduce la cantidad';
-  if(hint)hint.textContent='Selecciona un lote para ver lo disponible.';
+  qty.removeAttribute('max');qty.placeholder='Cantidad utilizada';
+  if(hint)hint.textContent='Sin lote identificado: se propondrá FIFO si hay saldo; el exceso quedará pendiente de compra y lote.';
   if(hint)hint.style.color='';
   return;
  }
  const amount=discreteStock(p)?found.amount:fromBase(found.amount,shownUnit);
  const available=Math.max(0,Number(amount.toFixed(8)));
- qty.max=String(available);
- qty.placeholder='Máximo '+fmt(available)+' '+shownUnit;
+ qty.removeAttribute('max'); // Permite registrar consumos superiores, pendientes de compra y lote.
+ qty.placeholder='Disponible '+fmt(available)+' '+shownUnit;
  const excess=qty.value!==''&&Number(qty.value)>available+0.00000001;
  if(hint){
-  hint.textContent='Disponible en '+found.lot+': '+fmt(available)+' '+shownUnit+(excess?' · Supera las existencias':'');
+  hint.textContent='Disponible en '+found.lot+': '+fmt(available)+' '+shownUnit+(excess?' · El exceso quedará pendiente de compra y lote':'');
   hint.style.color=excess?'#a53024':'#145443';
  }
 }
@@ -627,7 +627,7 @@ function updateMultiLotChoices(productRow){
   const select=line.querySelector('[name=lineLot]');if(!select||select.tagName!=='SELECT')continue;
   const own=select.value;
   const taken=new Set(lines.filter(x=>x!==line).map(x=>x.querySelector('[name=lineLot]')?.value?.toLowerCase()).filter(Boolean));
-  const choices='<option value="">Sin indicar (FIFO si es posible)</option>'+lots.filter(x=>x.lot===own||!taken.has(x.lot.toLowerCase())).map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+'</option>').join('');
+  const choices='<option value="">Sin lote / pendiente de compra</option>'+lots.filter(x=>x.lot===own||!taken.has(x.lot.toLowerCase())).map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+'</option>').join('');
   select.innerHTML=choices;
   if(lots.some(x=>x.lot===own))select.value=own;
   select.onchange=()=>{updateMultiLotChoices(productRow);updateMultiPending(productRow);};
@@ -659,7 +659,7 @@ function fillMultiFIFO(row){
  if(!p||!totalInput||!totalInput.value||Number(totalInput.value)<=0)return t('Selecciona un producto e indica primero la cantidad total.','error');
  const total=Number(totalInput.value),required=discreteStock(p)?total:toBase(total,p.unit);
  const allocation=fifoLotAllocation(selected,p.id,required);
- if(!allocation)return t('No hay lotes identificados suficientes para el reparto FIFO. Puedes repartir manualmente o usar una línea sin lote.','error');
+ if(!allocation)return t('Los lotes identificados no cubren toda la cantidad. Reparte manualmente y deja el exceso en una línea sin lote, pendiente de compra.','error');
  const list=row.querySelector('.multi-lot-list');list.innerHTML='';
  for(const x of allocation){
   multiAddLotLine(row);
@@ -752,29 +752,83 @@ async function multiSubmit(e){
    }
   }
   moves=rows.flatMap((row,i)=>[...row.querySelectorAll('.multi-lot-line')].map((lot,j)=>{try{return multiBuildMove(form,row,lot)}catch(e){throw Error('Producto '+(i+1)+' línea '+(j+1)+': '+e.message)}}));
-  const byGroup=new Map(),byLot=new Map();
-  for(const m of moves){
-   if(m.kind==='entrada'||m.kind==='revision')continue;
-   const key=stockGroupKey(prod(m.productId)),group=byGroup.get(key)||{pid:m.productId,out:0};group.out-=m.delta;byGroup.set(key,group);
-   if(m.lot){const lk=key+'::'+m.lot.toLowerCase(),info=byLot.get(lk)||{pid:m.productId,lot:m.lot,out:0};info.out-=m.delta;byLot.set(lk,info);}
+  if(form.multiKind.value==='revision'){
+   const groups=moves.map(m=>stockGroupKey(prod(m.productId)));
+   if(new Set(groups).size!==groups.length)throw Error('En una revisión indica cada producto una sola vez.');
   }
-  for(const g of byGroup.values())if(g.out>stockBase(selected,g.pid)+0.000001)throw Error('Existencias insuficientes de '+stockDisplayName(prod(g.pid))+'.');
-  if(form.multiKind.value==='revision'){const groups=moves.map(m=>stockGroupKey(prod(m.productId)));if(new Set(groups).size!==groups.length)throw Error('En una revisión indica cada producto una sola vez: la cantidad corresponde al total físico contado.');}
-  for(const l of byLot.values()){const record=lotSummary(selected,l.pid).lots.find(x=>x.lot.toLowerCase()===l.lot.toLowerCase());if(!record||l.out>record.amount+0.000001)throw Error('Existencias insuficientes del lote '+l.lot+'.');}
-  if(['tratamiento','salida'].includes(form.multiKind.value)){
+  if(form.multiKind.value==='salida'){
+   const byGroup=new Map(),byLot=new Map();
+   for(const m of moves){
+    const key=stockGroupKey(prod(m.productId)),g=byGroup.get(key)||{pid:m.productId,out:0};g.out-=m.delta;byGroup.set(key,g);
+    if(m.lot){const lk=key+'::'+m.lot.toLowerCase(),l=byLot.get(lk)||{pid:m.productId,lot:m.lot,out:0};l.out-=m.delta;byLot.set(lk,l);}
+   }
+   for(const g of byGroup.values())if(g.out>stockBase(selected,g.pid)+0.000001)throw Error('Existencias insuficientes de '+stockDisplayName(prod(g.pid))+'.');
+   for(const l of byLot.values()){const record=lotSummary(selected,l.pid).lots.find(x=>x.lot.toLowerCase()===l.lot.toLowerCase());if(!record||l.out>record.amount+0.000001)throw Error('Existencias insuficientes del lote '+l.lot+'.');}
+  }
+  if(form.multiKind.value==='tratamiento'){
+   // Record ALL applied quantity, but never invent a purchase or a batch number.
+   // The portion without confirmed stock is an unlotted, negative pending movement.
+   const expanded=[],spentGroup=new Map(),spentLot=new Map();
+   for(const m of moves){
+    const p=prod(m.productId),key=stockGroupKey(p),required=-m.delta;
+    const usedGroup=spentGroup.get(key)||0;
+    const groupFree=Math.max(0,stockBase(selected,m.productId)-usedGroup);
+    const split=(base,lot,pending=false)=>{
+     if(base<=0.0000001)return;
+     expanded.push({...m,lot,delta:-base,
+      qty:discreteStock(p)?base:fromBase(base,m.qtyUnit),
+      pendingPurchase:pending,pendingLot:pending,pendingReason:pending?'Compra pendiente de confirmar y lote pendiente de asignar':''});
+    };
+    if(m.lot){
+     const lotKey=key+'::'+m.lot.toLowerCase();
+     const matching=lotSummary(selected,m.productId).lots.find(x=>x.lot.toLowerCase()===m.lot.toLowerCase());
+     const freeLot=Math.max(0,(matching?.amount||0)-(spentLot.get(lotKey)||0));
+     const confirmed=Math.min(required,freeLot,groupFree);
+     split(confirmed,m.lot);
+     spentLot.set(lotKey,(spentLot.get(lotKey)||0)+confirmed);
+     spentGroup.set(key,usedGroup+confirmed);
+     split(required-confirmed,'',true);
+    }else{
+     let rest=required,used=0;
+     // FIFO over actual lot balances, without requiring that the whole request fit.
+     const summary=lotSummary(selected,m.productId);
+     const familyLots=summary.lots.filter(x=>x.amount>0.000001);
+     const historicalDates=new Map();
+     for(const past of model.movements){
+      if(past.customerId!==selected||past.kind!=='entrada'||stockGroupKey(prod(past.productId))!==key||!past.lot)continue;
+      const date=String(past.date||'9999-12-31'),old=historicalDates.get(past.lot);
+      if(!old||date<old)historicalDates.set(past.lot,date);
+     }
+     familyLots.sort((a,b)=>(historicalDates.get(a.lot)||'9999-12-31').localeCompare(historicalDates.get(b.lot)||'9999-12-31')||a.lot.localeCompare(b.lot));
+     for(const x of familyLots){
+      const lk=key+'::'+x.lot.toLowerCase();
+      const free=Math.max(0,x.amount-(spentLot.get(lk)||0));
+      const take=Math.min(rest,free,Math.max(0,groupFree-used));
+      if(take>0.0000001){split(take,x.lot);rest-=take;used+=take;spentLot.set(lk,(spentLot.get(lk)||0)+take);}
+      if(rest<=0.0000001)break;
+     }
+     // Stock without a known lot may still be consumed as unassigned stock.
+     const confirmedNoLot=Math.min(rest,Math.max(0,groupFree-used));
+     if(confirmedNoLot>0.0000001){split(confirmedNoLot,'');rest-=confirmedNoLot;used+=confirmedNoLot;}
+     spentGroup.set(key,usedGroup+used);
+     split(rest,'',true);
+    }
+   }
+   moves=expanded;
+  }else if(form.multiKind.value==='salida'){
    const expanded=[];
    for(const m of moves){
-    const group=stockGroupKey(prod(m.productId));
-    if(!m.lot&&moves.filter(x=>stockGroupKey(prod(x.productId))===group).length===1){
+    const key=stockGroupKey(prod(m.productId));
+    if(!m.lot&&moves.filter(x=>stockGroupKey(prod(x.productId))===key).length===1){
      const allocation=fifoLotAllocation(selected,m.productId,-m.delta);
-     if(allocation){for(const a of allocation){expanded.push({...m,lot:a.lot,delta:-a.base,qty:discreteStock(prod(m.productId))?a.base:fromBase(a.base,m.qtyUnit)});}continue;}
+     if(allocation){for(const a of allocation)expanded.push({...m,lot:a.lot,delta:-a.base,qty:discreteStock(prod(m.productId))?a.base:fromBase(a.base,m.qtyUnit)});continue;}
     }
     expanded.push(m);
    }
    moves=expanded;
   }
  }catch(err){return t(err.message,'error');}
- const summary=moves.map(m=>stockDisplayName(prod(m.productId))+': '+(m.kind==='entrada'?'+':'−')+fmt(fromStockBase(Math.abs(m.delta),prod(m.productId)))+' '+stockUnit(prod(m.productId))+' · lote '+(m.lot||'sin indicar')).join('\n');
+ const summary=moves.map(m=>stockDisplayName(prod(m.productId))+': '+(m.kind==='entrada'?'+':'−')+fmt(fromStockBase(Math.abs(m.delta),prod(m.productId)))+' '+stockUnit(prod(m.productId))+' · '+(m.pendingPurchase?'PENDIENTE COMPRA Y LOTE':'lote '+(m.lot||'sin indicar'))).join('\n');
  if(!confirm('Cliente: '+cName(selected)+'\n'+summary+'\n\n¿Confirmas guardar la operación completa?'))return;
  const op=id(),registered=stamp(),before=model.movements.length;
  model.movements.push(...moves.map(m=>({...m,id:id(),operationId:op,recorded:registered,technician:model.tech})));
