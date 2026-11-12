@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='73', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='74', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -611,7 +611,7 @@ function multiAddLotLine(productRow){
  line.className='multi-lot-line';line.style.cssText='padding:10px 0;border-bottom:1px solid #e5ece6';
  const label=entry?'Número de envases':revision?'Existencias físicas contadas':'Cantidad de producto';
  const unitChoices=U.map(u=>'<option value="'+esc(u)+'">'+esc(u)+'</option>').join('');
- line.innerHTML='<div class="fields"><div class="field"><label>'+label+' *</label><input type="number" name="lineQty" min="'+(revision?'0':'0.000001')+'" step="'+(entry?'1':'any')+'" required inputmode="'+(entry?'numeric':'decimal')+'" placeholder="'+(entry?'Nº de envases':'Cantidad')+'"></div>'
+ line.innerHTML='<div class="fields"><div class="field"><label>'+label+' *</label><input type="number" name="lineQty" min="'+(revision?'0':entry?'1':'0.000001')+'" step="'+(entry?'1':'any')+'" required inputmode="'+(entry?'numeric':'decimal')+'" placeholder="'+(entry?'Nº de envases':'Cantidad')+'"></div>'
  +'<div class="field"><label>Lote (opcional)</label><input name="lineLot" type="text" maxlength="100" placeholder="Sin indicar"></div></div>'
  +'<div class="row between" style="margin-top:7px"><div class="field" style="min-width:100px;flex:1"><label>Unidad de la cantidad</label><select name="lineUnit">'+unitChoices+'</select></div><button class="btn danger multi-remove-lot" type="button">Quitar línea</button></div>';
  line.querySelector('.multi-remove-lot').onclick=()=>{if(list.children.length===1){t('Debe quedar al menos una línea de cantidad por producto.','error');return;}line.remove();};
