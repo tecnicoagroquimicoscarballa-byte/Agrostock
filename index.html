@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='100', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='101', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -872,10 +872,12 @@ function movementTable(arr,withClient=false){
   const originallyCovered=Math.max(0,total-oldDeficit);
   const batchNames=[...new Set(group.map(x=>x.lot).filter(Boolean))];
   const lotLabel=batchNames.length===0?'Sin lote (opcional)':batchNames.length===1?batchNames[0]:batchNames.length+' lotes';
-  const amount=out?'−'+fmt(fromStockBase(total,p))+' '+stockUnit(p):
+  const observed=m.kind==='revision'?Number(m.after??(Number(m.before||0)+Number(m.delta||0))):null;
+  const amount=m.kind==='revision'?'Observado: '+fmt(fromStockBase(observed,p))+' '+stockUnit(p):out?'−'+fmt(fromStockBase(total,p))+' '+stockUnit(p):
     m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?
     (discreteStock(p)?fmt(m.packCount)+' '+stockUnit(p)+' (formato comercial)':fmt(m.packCount)+' envase'+(m.packCount===1?'':'s')+(m.packSize?' × '+fmt(m.packSize)+' '+(p?.unit||m.qtyUnit):'')):signed(m);
   let detail='';
+  if(m.kind==='revision')detail='<div class="muted small">Existencias teóricas anteriores: '+esc(fmt(fromStockBase(Number(m.before||0),p))+' '+stockUnit(p))+' · Ajuste calculado: '+signed(m)+'</div>';
   if(oldDeficit>0.000001){
    detail='<div class="muted small">Al aplicar: '+esc(fmt(fromStockBase(originallyCovered,p))+' '+stockUnit(p))+' con existencias · '+esc(fmt(fromStockBase(oldDeficit,p))+' '+stockUnit(p))+' por confirmar compra</div>';
    detail+=still>0.000001?'<div class="pill red" style="display:inline-block;margin-top:4px">Pendiente compra: '+esc(fmt(fromStockBase(still,p))+' '+stockUnit(p))+'</div>':'<div class="muted small">Déficit cubierto por compras posteriores</div>';
