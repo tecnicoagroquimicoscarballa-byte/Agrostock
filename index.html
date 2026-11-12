@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='86', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='87', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -574,38 +574,100 @@ function eligiblePurchasesForPending(pending){
 function pendingRegularizationPanel(cid){
  const pending=model.movements.filter(m=>m.customerId===cid&&m.pendingPurchase&&m.kind==='tratamiento'&&m.delta<0);
  if(!pending.length)return '';
- return '<div class="card" style="margin:13px 0;border:1px solid #e4c58a"><h3>Pendiente de confirmar compra y lote</h3><p class="muted small">Registra antes la compra real indicando su lote. Después vincula aquí la parte aplicada. Si compraste más de lo pendiente, el resto permanece en existencias. El tratamiento NO se descuenta de nuevo.</p>'
+ return '<div class="card" style="margin:13px 0;border:1px solid #e4c58a"><h3>Aplicaciones pendientes de regularizar</h3><p class="muted small">Selecciona una o varias compras y reparte entre sus lotes la cantidad pendiente. El tratamiento no se descuenta de nuevo. La parte no vinculada seguirá pendiente.</p>'
  +pending.map(m=>{
   const p=prod(m.productId),options=eligiblePurchasesForPending(m),amount=Math.abs(m.delta);
-  return '<div class="filetile" style="margin-top:10px"><b>'+esc(stockDisplayName(p))+'</b> · Aplicación '+esc(m.date)+'<p class="small">Pendiente: <b>'+esc(fmt(fromStockBase(amount,p))+' '+stockUnit(p))+'</b></p>'
-   +(options.length?'<form class="regularize-pending-form stack" data-pending-id="'+esc(m.id)+'"><div class="field"><label>Compra y lote para justificar el consumo</label><select name="purchaseId" required>'+options.map(x=>{
-    const free=availablePurchaseForPending(x);
-    return '<option value="'+esc(x.id)+'">'+esc(x.date+' · Lote '+x.lot+' · compra '+fmt(fromStockBase(movementStockDelta(x,prod(x.productId)),p))+' '+stockUnit(p)+' · disponible para vincular '+fmt(fromStockBase(free,p))+' '+stockUnit(p))+'</option>';
-   }).join('')+'</select></div><button type="submit" class="btn">Vincular compra y asignar lote</button></form>'
-   :'<div class="notice">No hay una compra con lote y saldo suficiente para vincular. Registra una compra o comprueba sus existencias.</div>')
+  return '<div class="filetile" style="margin-top:10px"><b>'+esc(stockDisplayName(p))+'</b> · Aplicación '+esc(m.date)+'<p class="small">Por regularizar: <b>'+esc(fmt(fromStockBase(amount,p))+' '+stockUnit(p))+'</b></p>'
+   +(options.length?'<form class="regularize-pending-form stack" data-pending-id="'+esc(m.id)+'"><div class="regularize-rows stack"></div><div class="regularize-remaining notice" aria-live="polite">Pendiente: '+esc(fmt(fromStockBase(amount,p))+' '+stockUnit(p))+'</div><button type="button" class="btn alt regularize-add">＋ Añadir otro lote</button><button type="submit" class="btn">Confirmar reparto de lotes</button></form>'
+   :'<div class="notice">No hay compras con lote y saldo disponible para vincular. Registra primero una compra real con su lote.</div>')
    +'</div>';
  }).join('')+'</div>';
 }
+function regularizationRowInfo(form){
+ const m=model.movements.find(x=>x.id===form.dataset.pendingId);
+ if(!m)return null;
+ const p=prod(m.productId),options=eligiblePurchasesForPending(m);
+ return {m,p,options,needed:Math.abs(m.delta)};
+}
+function updateRegularizationRemaining(form){
+ const info=regularizationRowInfo(form);if(!info)return;
+ let total=0,invalid=false;
+ for(const line of form.querySelectorAll('.regularize-lot-row')){
+  const select=line.querySelector('[name=purchaseId]'),qty=line.querySelector('[name=regularizeQty]'),label=line.querySelector('.regularize-availability');
+  const purchase=info.options.find(x=>x.id===select.value),free=purchase?availablePurchaseForPending(purchase):0;
+  const value=qty.value.trim(),amount=value===''?0:(discreteStock(info.p)?Number(value):toBase(num(value),info.p.unit));
+  total+=Number.isFinite(amount)?amount:0;
+  if(value!==''&&(!Number.isFinite(amount)||amount<=0||amount>free+0.000001))invalid=true;
+  if(label)label.textContent=purchase?'Disponible en lote '+purchase.lot+': '+fmt(fromStockBase(free,info.p))+' '+stockUnit(info.p):'Selecciona una compra';
+  if(qty)qty.max=String(Number(fromStockBase(free,info.p).toFixed(8)));
+ }
+ const left=info.needed-total,box=form.querySelector('.regularize-remaining');
+ if(box){
+  box.textContent=(left>=-0.000001?'Falta por vincular: ':'Exceso: ')+fmt(fromStockBase(Math.abs(left),info.p))+' '+stockUnit(info.p);
+  box.style.color=invalid||left<-.000001?'#a53024':'#145443';
+ }
+}
+function addRegularizationLotRow(form){
+ const info=regularizationRowInfo(form);if(!info||!info.options.length)return;
+ const list=form.querySelector('.regularize-rows'),line=document.createElement('div');
+ line.className='regularize-lot-row';
+ line.style.cssText='border-bottom:1px solid #e5ece6;padding:8px 0';
+ const used=new Set([...list.querySelectorAll('[name=purchaseId]')].map(x=>x.value));
+ const choices=info.options.filter(x=>!used.has(x.id));
+ if(!choices.length)return t('Ya has añadido todas las compras disponibles para este pendiente.','error');
+ line.innerHTML='<div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:9px"><div class="field"><label>Compra / lote</label><select name="purchaseId">'+choices.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.date+' · '+x.lot)+'</option>').join('')+'</select></div><div class="field"><label>Cantidad ('+esc(stockUnit(info.p))+')</label><input type="number" name="regularizeQty" min="0.000001" step="'+(discreteStock(info.p)?'1':'any')+'" inputmode="decimal" required placeholder="Cantidad"></div></div><div class="row between" style="gap:6px;margin-top:4px"><span class="regularize-availability muted small"></span><button type="button" class="btn alt regularize-remove" style="padding:5px 9px">Quitar</button></div>';
+ list.appendChild(line);
+ const select=line.querySelector('[name=purchaseId]'),qty=line.querySelector('[name=regularizeQty]');
+ const refresh=()=>updateRegularizationRemaining(form);
+ select.onchange=()=>{qty.value='';refresh()};
+ qty.oninput=refresh;
+ line.querySelector('.regularize-remove').onclick=()=>{line.remove();refresh()};
+ const already=[...list.querySelectorAll('.regularize-lot-row')].filter(x=>x!==line).reduce((sum,x)=>sum+(Number(x.querySelector('[name=regularizeQty]').value)||0),0);
+ const free=availablePurchaseForPending(choices[0]),left=Math.max(0,fromStockBase(info.needed,info.p)-already);
+ qty.value=String(Number(Math.min(left,fromStockBase(free,info.p)).toFixed(8)));
+ refresh();
+}
 async function regularizePendingApplication(e){
  e.preventDefault();
- const form=e.target,m=model.movements.find(x=>x.id===form.dataset.pendingId);
- const purchase=model.movements.find(x=>x.id===form.querySelector('[name=purchaseId]').value);
- if(!m||!m.pendingPurchase||m.kind!=='tratamiento'||!purchase)return t('Ya no existe este pendiente o la compra seleccionada.','error');
- if(!eligiblePurchasesForPending(m).some(x=>x.id===purchase.id))return t('La compra ya no está disponible para este pendiente.','error');
- const needed=Math.abs(m.delta),free=availablePurchaseForPending(purchase),take=Math.min(needed,free);
- if(take<=0.000001)return t('El lote de la compra no tiene saldo disponible.','error');
- const p=prod(m.productId),remainder=needed-take;
- const msg='Compra: '+fmt(fromStockBase(movementStockDelta(purchase,prod(purchase.productId)),p))+' '+stockUnit(p)+' · lote '+purchase.lot+
- '\\nAsignar al tratamiento pendiente: '+fmt(fromStockBase(take,p))+' '+stockUnit(p)+
- (remainder>0.000001?'\\nContinuará pendiente: '+fmt(fromStockBase(remainder,p))+' '+stockUnit(p):'')+
- '\\nEl stock TOTAL no cambia al vincular. El excedente de la compra sigue disponible. ¿Confirmas?';
+ const form=e.target,info=regularizationRowInfo(form);
+ if(!info||!info.m.pendingPurchase||info.m.kind!=='tratamiento')return t('El pendiente ya no está disponible.','error');
+ const {m,p,needed,options}=info,lines=[...form.querySelectorAll('.regularize-lot-row')];
+ if(!lines.length)return t('Añade al menos una compra y lote.','error');
+ const allocations=[],usedPurchases=new Set(),byLot=new Map();
+ let assigned=0;
+ for(const line of lines){
+  const purchase=options.find(x=>x.id===line.querySelector('[name=purchaseId]').value);
+  const qty=line.querySelector('[name=regularizeQty]'),base=discreteStock(p)?Number(qty.value):toBase(num(qty.value),p.unit);
+  if(!purchase||!qty.value||!Number.isFinite(base)||base<=0)return t('Introduce una cantidad positiva en cada lote.','error');
+  if(usedPurchases.has(purchase.id))return t('La misma compra aparece en más de una línea.','error');
+  if(base>availablePurchaseForPending(purchase)+0.000001)return t('Superas la cantidad disponible para vincular del lote '+purchase.lot+'.','error');
+  usedPurchases.add(purchase.id);assigned+=base;
+  const lk=purchase.lot.toLowerCase();byLot.set(lk,(byLot.get(lk)||0)+base);
+  allocations.push({purchase,base});
+ }
+ if(assigned>needed+0.000001)return t('La suma asignada supera el pendiente del tratamiento.','error');
+ for(const [lot,total] of byLot){
+  const available=lotSummary(m.customerId,m.productId).lots.filter(x=>x.lot.toLowerCase()===lot).reduce((sum,x)=>sum+x.amount,0);
+  if(total>available+0.000001)return t('Las cantidades seleccionadas superan el saldo del lote '+lot+'.','error');
+ }
+ const remaining=Math.max(0,needed-assigned);
+ const linesSummary=allocations.map(x=>'Lote '+x.purchase.lot+': '+fmt(fromStockBase(x.base,p))+' '+stockUnit(p)).join('\n');
+ const msg='Regularizar '+stockDisplayName(p)+'\n'+linesSummary+'\n'+
+ (remaining>0.000001?'Seguirá pendiente: '+fmt(fromStockBase(remaining,p))+' '+stockUnit(p)+'\n':'')+
+ 'El saldo TOTAL no cambia y no se repetirá el descuento del tratamiento. ¿Confirmas?';
  if(!confirm(msg))return;
- const original={...m},before=model.movements.length;
- const updated={...m,delta:-take,qty:discreteStock(p)?take:fromBase(take,m.qtyUnit),lot:purchase.lot,pendingPurchase:false,pendingLot:false,pendingReason:'',linkedPurchaseId:purchase.id,regularizedAt:stamp()};
- const residual=remainder>0.000001?{...m,id:id(),delta:-remainder,qty:discreteStock(p)?remainder:fromBase(remainder,m.qtyUnit),lot:'',pendingPurchase:true,pendingLot:true,linkedPurchaseId:null}:null;
- const index=model.movements.indexOf(m);model.movements[index]=updated;if(residual)model.movements.push(residual);
- try{await save();}catch(err){model.movements[index]=original;model.movements.length=before;return t('No se pudo guardar la regularización: '+err.message,'error');}
- render();t('Compra y lote vinculados; sin descontar de nuevo el tratamiento.');
+ const index=model.movements.indexOf(m),original={...m},before=model.movements.length,when=stamp();
+ const children=allocations.map(({purchase,base},i)=>({
+  ...m,id:i===0?m.id:id(),delta:-base,
+  qty:discreteStock(p)?base:fromBase(base,m.qtyUnit),
+  lot:purchase.lot,pendingPurchase:false,pendingLot:false,pendingReason:'',
+  linkedPurchaseId:purchase.id,regularizedAt:when
+ }));
+ model.movements[index]=children[0];
+ model.movements.push(...children.slice(1));
+ if(remaining>0.000001)model.movements.push({...m,id:id(),delta:-remaining,qty:discreteStock(p)?remaining:fromBase(remaining,m.qtyUnit),lot:'',pendingPurchase:true,pendingLot:true,linkedPurchaseId:null});
+ try{await save()}catch(err){model.movements[index]=original;model.movements.length=before;return t('No se pudo guardar la regularización: '+err.message,'error')}
+ render();t('Lotes vinculados en una sola operación. El stock total no se ha descontado de nuevo.');
 }
 function autoLot(cid,pid,delta){
  const summary=lotSummary(cid,pid),positive=summary.lots.filter(x=>x.amount>0.000001);
@@ -1239,7 +1301,7 @@ document.querySelectorAll('[data-customer-import]').forEach(b=>b.onclick=()=>inc
 const cdSearch=$('clientDirectorySearch');if(cdSearch)cdSearch.oninput=e=>{customerDirectoryFilter=e.target.value;const pos=e.target.selectionStart;render();const n=$('clientDirectorySearch');if(n){n.focus();n.setSelectionRange(pos,pos)}};
 const dirFile=$('directoryCustomersImport');if(dirFile)dirFile.onchange=async e=>{try{if(e.target.files?.[0])await importCustomerDirectory(e.target.files[0])}catch(err){t(err.message,'error');alert('No se ha importado el directorio: '+err.message)}};
 
-document.querySelectorAll('.regularize-pending-form').forEach(f=>f.onsubmit=regularizePendingApplication);
+document.querySelectorAll('.regularize-pending-form').forEach(f=>{f.onsubmit=regularizePendingApplication;f.querySelector('.regularize-add').onclick=()=>addRegularizationLotRow(f);addRegularizationLotRow(f)});
 const mySearch=$('myProductSearch');if(mySearch)mySearch.oninput=e=>{myProductFilter=e.target.value;const pos=e.target.selectionStart;render();const field=$('myProductSearch');if(field){field.focus();field.setSelectionRange(pos,pos)}};
 const catalogSearch=$('productCatalogSearch');
 if(catalogSearch)catalogSearch.oninput=e=>{const v=e.target.value,pos=e.target.selectionStart;productFilter=v;render();const fresh=$('productCatalogSearch');if(fresh){fresh.focus();fresh.setSelectionRange(pos,pos)}};
