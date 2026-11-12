@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='98', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='99', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -592,7 +592,7 @@ function lotSummary(cid,pid){
   const d=movementStockDelta(m,prod(m.productId)),lot=String(m.lot||'').trim();
   if(m.kind==='asignacion_lote'){
    const moved=Number(m.lotQtyBase)||0;
-   if(lot&&moved>0){sums.set(lot,(sums.get(lot)||0)-moved);unassigned+=moved;}
+   if(lot&&moved>0){const shift=m.sourceKind==='entrada'?moved:-moved;sums.set(lot,(sums.get(lot)||0)+shift);unassigned-=shift;}
    continue;
   }
   if(lot)sums.set(lot,(sums.get(lot)||0)+d);else unassigned+=d;
@@ -652,22 +652,25 @@ function pendingPurchaseState(){
  }
  return remaining;
 }
+function lotUnassignedMovementBalance(m){
+ if(!m||m.lot||!['entrada','tratamiento','salida'].includes(m.kind))return 0;
+ const total=Math.abs(movementStockDelta(m,prod(m.productId)));
+ const linked=model.movements.filter(x=>x.kind==='asignacion_lote'&&x.pendingMovementId===m.id).reduce((n,x)=>n+Math.max(0,Number(x.lotQtyBase)||0),0);
+ return Math.max(0,total-linked);
+}
 function optionalLotTargets(cid,pid){
  const p=prod(pid);if(!p)return [];
- const key=stockGroupKey(p),summary=lotSummary(cid,pid);
- let toCover=Math.max(0,-summary.unassigned);
- if(toCover<=.000001)return [];
- const assigned=new Map();
- for(const m of model.movements)if(m.kind==='asignacion_lote'&&m.pendingMovementId)
-  assigned.set(m.pendingMovementId,(assigned.get(m.pendingMovementId)||0)+(Number(m.lotQtyBase)||0));
- const targets=[];
- for(const m of model.movements){
-  if(m.customerId!==cid||stockGroupKey(prod(m.productId))!==key||m.lot||!['tratamiento','salida'].includes(m.kind)||m.delta>=0)continue;
-  const free=Math.max(0,Math.abs(movementStockDelta(m,prod(m.productId)))-(assigned.get(m.id)||0));
-  if(free>0.000001&&toCover>0.000001){const take=Math.min(free,toCover);targets.push({m,free:take});toCover-=take;}
- }
- return targets;
+ const key=stockGroupKey(p);
+ return model.movements.filter(m=>m.customerId===cid&&stockGroupKey(prod(m.productId))===key&&['tratamiento','salida'].includes(m.kind)&&!m.lot&&m.delta<0)
+  .map(m=>({m,free:lotUnassignedMovementBalance(m)})).filter(x=>x.free>0.000001);
 }
+function purchaseLotTargets(cid,pid){
+ const p=prod(pid);if(!p)return [];
+ const key=stockGroupKey(p);
+ return model.movements.filter(m=>m.customerId===cid&&stockGroupKey(prod(m.productId))===key&&m.kind==='entrada'&&!m.lot&&movementStockDelta(m,prod(m.productId))>0)
+  .map(m=>({m,free:lotUnassignedMovementBalance(m)})).filter(x=>x.free>0.000001);
+}
+
 function optionalLotPurchases(cid,pid,chosenIds=null){
  const p=prod(pid);if(!p)return [];
  const key=stockGroupKey(p);
@@ -681,9 +684,33 @@ function lotAssignmentPanel(cid,onlyPurchaseIds=null){
   const targets=optionalLotTargets(cid,p.id),purchases=optionalLotPurchases(cid,p.id,onlyPurchaseIds);
   if(!targets.length||!purchases.length)continue;
   const options=purchases.map(x=>{const balance=lotSummary(cid,p.id).lots.find(z=>z.lot===x.lot)?.amount||0;return '<option value="'+esc(x.id)+'">'+esc(x.lot+' · '+fmt(fromStockBase(balance,p))+' '+stockUnit(p)+' disponibles')+'</option>'}).join('');
-  rows.push('<div class="filetile" style="margin:9px 0"><b>'+esc(stockDisplayName(p))+'</b><p class="muted small">Consumo sin lote por atribuir: '+esc(fmt(fromStockBase(Math.max(0,-lotSummary(cid,p.id).unassigned),p))+' '+stockUnit(p))+'</p><form class="optional-lot-assignment stack" data-cid="'+esc(cid)+'" data-pid="'+esc(p.id)+'"><div class="field"><label>Consumo anterior</label><select name="pendingMovementId">'+targets.map(x=>'<option value="'+esc(x.m.id)+'">'+esc(x.m.date+' · '+fmt(fromStockBase(x.free,p))+' '+stockUnit(p)+' sin lote')+'</option>').join('')+'</select></div><div class="field"><label>Asignar al lote de esta compra</label><select name="purchaseId">'+options+'</select></div><div class="field"><label>Cantidad a atribuir ('+esc(stockUnit(p))+')</label><input type="number" name="lotQty" min="0.000001" step="'+(discreteStock(p)?'1':'any')+'" value="'+esc(String(Number(fromStockBase(Math.min(targets[0].free,lotSummary(cid,p.id).lots.find(z=>z.lot===purchases[0].lot)?.amount||0),p).toFixed(8))))+'" required></div><button class="btn" type="submit">Asignar lote sin descontar de nuevo</button></form></div>');
+  rows.push('<div class="filetile" style="margin:9px 0"><b>'+esc(stockDisplayName(p))+'</b><p class="muted small">Consumos anteriores sin lote: '+esc(fmt(fromStockBase(targets.reduce((n,x)=>n+x.free,0),p))+' '+stockUnit(p))+'</p><form class="optional-lot-assignment stack" data-cid="'+esc(cid)+'" data-pid="'+esc(p.id)+'"><div class="field"><label>Consumo anterior</label><select name="pendingMovementId">'+targets.map(x=>'<option value="'+esc(x.m.id)+'">'+esc(x.m.date+' · '+fmt(fromStockBase(x.free,p))+' '+stockUnit(p)+' sin lote')+'</option>').join('')+'</select></div><div class="field"><label>Asignar al lote de esta compra</label><select name="purchaseId">'+options+'</select></div><div class="field"><label>Cantidad a atribuir ('+esc(stockUnit(p))+')</label><input type="number" name="lotQty" min="0.000001" step="'+(discreteStock(p)?'1':'any')+'" value="'+esc(String(Number(fromStockBase(Math.min(targets[0].free,lotSummary(cid,p.id).lots.find(z=>z.lot===purchases[0].lot)?.amount||0),p).toFixed(8))))+'" required></div><button class="btn" type="submit">Asignar lote sin descontar de nuevo</button></form></div>');
  }
  return rows.join('');
+}
+function purchaseLotAssignmentPanel(cid){
+ const keys=new Set(model.movements.filter(m=>m.customerId===cid&&m.kind==='entrada'&&!m.lot).map(m=>stockGroupKey(prod(m.productId))));
+ const rows=[];
+ for(const key of keys){
+  const p=model.products.find(x=>stockGroupKey(x)===key);if(!p)continue;
+  const targets=purchaseLotTargets(cid,p.id);
+  if(!targets.length)continue;
+  rows.push('<div class="filetile" style="margin:9px 0"><b>'+esc(stockDisplayName(p))+'</b><p class="muted small">Compras anteriores sin lote: '+esc(fmt(fromStockBase(targets.reduce((n,x)=>n+x.free,0),p))+' '+stockUnit(p))+'</p><form class="assign-purchase-lot stack" data-cid="'+esc(cid)+'" data-pid="'+esc(p.id)+'"><div class="field"><label>Compra sin lote</label><select name="purchaseMovementId">'+targets.map(x=>'<option value="'+esc(x.m.id)+'">'+esc(x.m.date+' · '+fmt(fromStockBase(x.free,p))+' '+stockUnit(p)+' pendientes de identificar')+'</option>').join('')+'</select></div><div class="field"><label>Número de lote (opcional, si decides identificarlo)</label><input name="newLot" maxlength="100" required placeholder="Escribe el lote real"></div><div class="field"><label>Cantidad a identificar ('+esc(stockUnit(p))+')</label><input type="number" name="lotQty" min="0.000001" step="'+(discreteStock(p)?'1':'any')+'" value="'+esc(String(Number(fromStockBase(targets[0].free,p).toFixed(8))))+'" required></div><button class="btn" type="submit">Identificar lote de la compra (sin modificar stock)</button></form></div>');
+ }
+ return rows.join('');
+}
+async function savePurchaseLotAssignment(e){
+ e.preventDefault();
+ const form=e.target,cid=form.dataset.cid,pid=form.dataset.pid,p=prod(pid);
+ const purchaseId=form.querySelector('[name=purchaseMovementId]').value;
+ const target=purchaseLotTargets(cid,pid).find(x=>x.m.id===purchaseId);
+ const lot=String(form.querySelector('[name=newLot]').value||'').trim();
+ const raw=form.querySelector('[name=lotQty]').value,amount=p&&raw?(discreteStock(p)?Number(raw):toBase(Number(raw),p.unit)):NaN;
+ if(!target||!lot||!Number.isFinite(amount)||amount<=0||amount>target.free+.000001||(discreteStock(p)&&!Number.isInteger(amount)))return t('Comprueba el lote real y la cantidad pendiente de identificar.','error');
+ const adjustment={id:id(),customerId:cid,productId:pid,date:today(),kind:'asignacion_lote',sourceKind:'entrada',delta:0,qty:0,qtyUnit:p.unit,lot,lotQtyBase:amount,pendingMovementId:purchaseId,linkedPurchaseId:purchaseId,recorded:stamp(),technician:model.tech,notes:'Identificación de lote de una compra anterior, sin cambiar el stock'};
+ model.movements.push(adjustment);
+ try{await save()}catch(err){model.movements.pop();return t('No se pudo identificar el lote: '+err.message,'error')}
+ selected=cid;customerTab='historial';render();t('Lote de compra identificado. Existencias totales intactas.');
 }
 async function saveOptionalLotAssignment(e){
  e.preventDefault();
@@ -710,11 +737,12 @@ function askRecentPurchaseLotAssignment(cid,purchaseIds){
 function pendingRegularizationPanel(cid){
  const balances=pendingPurchaseState();
  const pending=model.movements.filter(m=>m.customerId===cid&&m.pendingPurchase&&m.delta<0&&(balances.get(m.id)||0)>0.000001);
- const lots=lotAssignmentPanel(cid);
+ const lots=lotAssignmentPanel(cid),purchaseLots=purchaseLotAssignmentPanel(cid);
  const unassigned=model.movements.filter(m=>m.customerId===cid&&!m.lot&&['entrada','tratamiento','salida'].includes(m.kind)).length;
  const note=unassigned?'<p class="muted small" style="margin:9px 0">ⓘ Hay movimientos sin lote indicado; asignarlos es opcional.</p>':'';
  return (pending.length?'<div class="notice" style="margin:10px 0"><b>Compras todavía pendientes de cubrir</b>'+pending.map(m=>'<p class="small">'+esc(stockDisplayName(prod(m.productId)))+' · '+esc(fmt(fromStockBase(balances.get(m.id),prod(m.productId)))+' '+stockUnit(prod(m.productId)))+'</p>').join('')+'</div>':'')
- +(lots?'<details class="card" style="margin:12px 0"><summary style="cursor:pointer"><b>Asignar lotes a consumos anteriores (opcional)</b></summary><p class="muted small">Elige la compra y el consumo. Esta operación solo distribuye cantidades entre lotes; no vuelve a descontar el producto.</p>'+lots+'</details>':'')+note;
+ +(lots?'<details class="card" style="margin:12px 0"><summary style="cursor:pointer"><b>Asignar lotes a consumos anteriores (opcional)</b></summary><p class="muted small">Elige la compra y el consumo. Esta operación solo distribuye cantidades entre lotes; no vuelve a descontar el producto.</p>'+lots+'</details>':'')
+ +(purchaseLots?'<details class="card" style="margin:12px 0"><summary style="cursor:pointer"><b>Identificar lotes de compras anteriores (opcional)</b></summary><p class="muted small">Introduce un lote real cuando lo conozcas. No modifica las existencias totales.</p>'+purchaseLots+'</details>':'')+note;
 }
 
 function regularizationRowInfo(form){
@@ -1480,6 +1508,7 @@ const cdSearch=$('clientDirectorySearch');if(cdSearch)cdSearch.oninput=e=>{custo
 const dirFile=$('directoryCustomersImport');if(dirFile)dirFile.onchange=async e=>{try{if(e.target.files?.[0])await importCustomerDirectory(e.target.files[0])}catch(err){t(err.message,'error');alert('No se ha importado el directorio: '+err.message)}};
 
 document.querySelectorAll('.optional-lot-assignment').forEach(f=>f.onsubmit=saveOptionalLotAssignment);
+document.querySelectorAll('.assign-purchase-lot').forEach(f=>f.onsubmit=savePurchaseLotAssignment);
 document.querySelectorAll('.regularize-pending-form').forEach(f=>{f.onsubmit=regularizePendingApplication;f.querySelector('.regularize-add').onclick=()=>addRegularizationLotRow(f);addRegularizationLotRow(f)});
 const mySearch=$('myProductSearch');if(mySearch)mySearch.oninput=e=>{myProductFilter=e.target.value;const pos=e.target.selectionStart;render();const field=$('myProductSearch');if(field){field.focus();field.setSelectionRange(pos,pos)}};
 const catalogSearch=$('productCatalogSearch');
