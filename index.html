@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='99', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='100', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -684,7 +684,7 @@ function lotAssignmentPanel(cid,onlyPurchaseIds=null){
   const targets=optionalLotTargets(cid,p.id),purchases=optionalLotPurchases(cid,p.id,onlyPurchaseIds);
   if(!targets.length||!purchases.length)continue;
   const options=purchases.map(x=>{const balance=lotSummary(cid,p.id).lots.find(z=>z.lot===x.lot)?.amount||0;return '<option value="'+esc(x.id)+'">'+esc(x.lot+' · '+fmt(fromStockBase(balance,p))+' '+stockUnit(p)+' disponibles')+'</option>'}).join('');
-  rows.push('<div class="filetile" style="margin:9px 0"><b>'+esc(stockDisplayName(p))+'</b><p class="muted small">Consumos anteriores sin lote: '+esc(fmt(fromStockBase(targets.reduce((n,x)=>n+x.free,0),p))+' '+stockUnit(p))+'</p><form class="optional-lot-assignment stack" data-cid="'+esc(cid)+'" data-pid="'+esc(p.id)+'"><div class="field"><label>Consumo anterior</label><select name="pendingMovementId">'+targets.map(x=>'<option value="'+esc(x.m.id)+'">'+esc(x.m.date+' · '+fmt(fromStockBase(x.free,p))+' '+stockUnit(p)+' sin lote')+'</option>').join('')+'</select></div><div class="field"><label>Asignar al lote de esta compra</label><select name="purchaseId">'+options+'</select></div><div class="field"><label>Cantidad a atribuir ('+esc(stockUnit(p))+')</label><input type="number" name="lotQty" min="0.000001" step="'+(discreteStock(p)?'1':'any')+'" value="'+esc(String(Number(fromStockBase(Math.min(targets[0].free,lotSummary(cid,p.id).lots.find(z=>z.lot===purchases[0].lot)?.amount||0),p).toFixed(8))))+'" required></div><button class="btn" type="submit">Asignar lote sin descontar de nuevo</button></form></div>');
+  rows.push('<div class="filetile" style="margin:9px 0"><b>'+esc(stockDisplayName(p))+'</b><p class="muted small">Consumos anteriores sin lote: '+esc(fmt(fromStockBase(targets.reduce((n,x)=>n+x.free,0),p))+' '+stockUnit(p))+'</p><form class="optional-lot-assignment stack" data-cid="'+esc(cid)+'" data-pid="'+esc(p.id)+'"><div class="field"><label>Consumo anterior</label><select name="pendingMovementId" required><option value="">Elige el consumo sin lote</option>'+targets.map(x=>'<option value="'+esc(x.m.id)+'">'+esc(x.m.date+' · '+fmt(fromStockBase(x.free,p))+' '+stockUnit(p)+' sin lote')+'</option>').join('')+'</select></div><div class="field"><label>Asignar a un lote existente (antiguo o recién comprado)</label><select name="purchaseId" required><option value="">Elige el lote; ninguno se asigna automáticamente</option>'+options+'</select></div><div class="field"><label>Cantidad a atribuir ('+esc(stockUnit(p))+')</label><input type="number" name="lotQty" min="0.000001" step="'+(discreteStock(p)?'1':'any')+'" placeholder="Cantidad a atribuir" required></div><button class="btn" type="submit">Asignar lote sin descontar de nuevo</button></form></div>');
  }
  return rows.join('');
 }
@@ -729,11 +729,13 @@ async function saveOptionalLotAssignment(e){
  t('Lote asignado. El saldo total del producto no ha cambiado.');
 }
 function askRecentPurchaseLotAssignment(cid,purchaseIds){
- const content=lotAssignmentPanel(cid,purchaseIds);
+ const content=lotAssignmentPanel(cid);
  if(!content)return;
- showModal('<h3>¿Asignar los consumos anteriores a los lotes comprados?</h3><p class="muted small">Opcional. Hay consumos anteriores sin lote. Puedes vincular ahora parte de ellos a los lotes de esta compra, o dejarlo para más adelante. No cambia el stock total.</p>'+content);
+ showModal('<h3>¿Quieres asignar algún consumo sin lote?</h3><p class="muted small">La compra ya está guardada. Puedes elegir cualquiera de los lotes existentes, tanto anteriores como recién comprados. Nada se asigna por defecto, y el saldo total no cambia. Puedes dejarlo para otro momento.</p>'+content+'<button type="button" class="btn alt" id="skipLotAssignment" style="margin-top:12px">No asignar ahora (más adelante)</button>');
  document.querySelectorAll('#modal .optional-lot-assignment').forEach(form=>form.onsubmit=saveOptionalLotAssignment);
+ const skip=$('skipLotAssignment');if(skip)skip.onclick=()=>$('modal')?.close();
 }
+
 function pendingRegularizationPanel(cid){
  const balances=pendingPurchaseState();
  const pending=model.movements.filter(m=>m.customerId===cid&&m.pendingPurchase&&m.delta<0&&(balances.get(m.id)||0)>0.000001);
@@ -1154,7 +1156,7 @@ async function multiSubmit(e){
  const summary=moves.map(m=>stockDisplayName(prod(m.productId))+': '+(m.kind==='entrada'?'+':'−')+fmt(fromStockBase(Math.abs(m.delta),prod(m.productId)))+' '+stockUnit(prod(m.productId))+' · '+(m.pendingPurchase?'PENDIENTE COMPRA Y LOTE':'lote '+(m.lot||'sin indicar'))).join('\n');
  if(!confirm('Cliente: '+cName(selected)+'\n'+summary+'\n\n¿Confirmas guardar la operación completa?'))return;
  const op=id(),registered=stamp(),before=model.movements.length;
- const offerLots=moves.some(m=>m.kind==='entrada'&&m.lot&&lotSummary(selected,m.productId).unassigned<-.000001);
+ const offerLots=moves.some(m=>m.kind==='entrada'&&optionalLotTargets(selected,m.productId).length>0);
  const newRecords=moves.map(m=>({...m,id:id(),operationId:op,recorded:registered,technician:model.tech}));
  model.movements.push(...newRecords);
  try{await save();}catch(err){model.movements.length=before;return t('No se pudo guardar la operación completa: '+err.message,'error');}
