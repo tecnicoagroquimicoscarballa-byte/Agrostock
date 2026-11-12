@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='93', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='94', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -486,7 +486,8 @@ function productOptionsForKind(kind,selectedId='',customerId=''){
  const purchase=kind==='entrada',items=model.products.filter(p=>(productActivated(p.id)&&!productHidden(p.id))||p.id===selectedId).sort((a,b)=>a.name.localeCompare(b.name));
  if(purchase)return '<option value="">Selecciona una presentación comercial</option>'+items.map(p=>`<option value="${esc(p.id)}" ${p.id===selectedId?'selected':''}>${esc(p.name)} (${esc(stockUnit(p))})${p.code?' · Ref. '+esc(p.code):''}</option>`).join('');
  const limited=['tratamiento','salida'].includes(kind)&&!!customerId;
- const grouped=new Map();for(const p of items){const key=stockGroupKey(p);if(limited&&!groupProductsFor(customerId).some(owned=>stockGroupKey(owned)===key))continue;if(!grouped.has(key))grouped.set(key,p);}
+ const owned=limited?new Set(groupProductsFor(customerId).filter(p=>Math.abs(stockBase(customerId,p.id))>0.000001).map(p=>stockGroupKey(p))):null;
+ const grouped=new Map();for(const p of items){const key=stockGroupKey(p);if(limited&&!owned.has(key))continue;if(!grouped.has(key))grouped.set(key,p);}
  const selected=prod(selectedId),chosen=selected?grouped.get(stockGroupKey(selected))?.id:'';
  return '<option value="">'+(limited?'Selecciona un producto del cliente':'Selecciona un producto (sin presentación)')+'</option>'+[...grouped.values()].sort((a,b)=>stockProductName(a).localeCompare(stockProductName(b))).map(p=>`<option value="${esc(p.id)}" ${p.id===chosen?'selected':''}>${esc(stockDisplayName(p))} (${esc(stockUnit(p))})</option>`).join('');
 }
@@ -511,7 +512,7 @@ document.head.appendChild(style);
 for(const sel of [...document.querySelectorAll('select')]){
 if(sel.id==='planLine')continue;
 const options=[...sel.options].map(o=>({value:o.value,text:o.text,disabled:o.disabled}));
-const isMain=['product','customer','quickCustomer','shareCustomer'].includes(sel.id);
+const isMain=['product','customer','quickCustomer','shareCustomer'].includes(sel.id)||['lineProduct','product','productId','customer','customerId','quickCustomer','shareCustomer'].includes(sel.name);
 if(!isMain&&options.length<12)continue;
 if(sel.closest('.ag-combo'))continue;
 const wrap=document.createElement('div');wrap.className='ag-combo';
@@ -521,7 +522,7 @@ const field=document.createElement('input');
 field.type='text';field.className='ag-combo-input';field.autocomplete='off';
 field.setAttribute('role','combobox');field.setAttribute('aria-autocomplete','list');field.setAttribute('aria-expanded','false');
 const placeholder=options.find(o=>!o.value)?.text||'Selecciona una opción';
-field.placeholder=sel.id==='product'?'':'🔎 '+placeholder;field.setAttribute('aria-label','Buscar '+(sel.id||'opción'));
+field.placeholder='🔎 '+(sel.name==='lineProduct'?'Escribe para buscar un producto':placeholder);field.setAttribute('aria-label','Buscar '+(sel.name||sel.id||'opción'));
 const arrow=document.createElement('span');arrow.className='ag-combo-icon';arrow.textContent='⌄';
 const clear=document.createElement('button');clear.type='button';clear.className='ag-combo-clear';clear.textContent='×';clear.title='Borrar selección y búsqueda';clear.setAttribute('aria-label','Borrar selección y búsqueda');clear.hidden=true;
 const menu=document.createElement('div');menu.className='ag-combo-menu';menu.setAttribute('role','listbox');menu.hidden=true;
@@ -670,7 +671,7 @@ function addRegularizationLotRow(form){
  const already=[...list.querySelectorAll('.regularize-lot-row')].filter(x=>x!==line).reduce((sum,x)=>sum+(Number(x.querySelector('[name=regularizeQty]').value)||0),0);
  const free=availablePurchaseForPending(choices[0]),left=Math.max(0,fromStockBase(info.needed,info.p)-already);
  qty.value=String(Number(Math.min(left,fromStockBase(free,info.p)).toFixed(8)));
- refresh();
+ refresh();installQuickSearch();
 }
 async function regularizePendingApplication(e){
  e.preventDefault();
@@ -854,7 +855,7 @@ function multiAddRow(){
   updateMultiPending(row);
  };
  row.querySelector('[name=lineProduct]').onchange=refresh;
- target.appendChild(row);multiAddLotLine(row);refresh();
+ target.appendChild(row);multiAddLotLine(row);refresh();installQuickSearch();
 }
 function multiAddLotLine(productRow){
  const form=$('multiMovement'),kind=form.multiKind.value,entry=kind==='entrada',revision=kind==='revision';
