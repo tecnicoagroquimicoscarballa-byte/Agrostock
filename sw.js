@@ -1,4 +1,4 @@
-const CACHE='agrostock-v3-63-product-movement-history-20261112';
+const CACHE='agrostock-v3-64-clear-voice-text-20261112';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icons/icon.svg'];
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
