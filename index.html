@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='80', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='81', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -629,8 +629,8 @@ function updateMultiLotChoices(productRow){
   const choices='<option value="">Sin indicar (FIFO si es posible)</option>'+lots.filter(x=>x.lot===own||!taken.has(x.lot.toLowerCase())).map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+'</option>').join('');
   select.innerHTML=choices;
   if(lots.some(x=>x.lot===own))select.value=own;
-  select.onchange=()=>{updateMultiLotChoices(productRow);const amount=line.querySelector('[name=lineQty]');if(amount){amount.scrollIntoView({block:'center',behavior:'smooth'});amount.focus({preventScroll:true});}};
-  line.querySelector('[name=lineUnit]').onchange=()=>updateMultiLotQuantityHint(productRow,line);
+  select.onchange=()=>{updateMultiLotChoices(productRow);updateMultiPending(productRow);};
+  line.querySelector('[name=lineUnit]').onchange=()=>{updateMultiLotQuantityHint(productRow,line);updateMultiPending(productRow);};
   updateMultiLotQuantityHint(productRow,line);
  }
  updateMultiPending(productRow);
@@ -646,18 +646,16 @@ function updateMultiPending(productRow){
   return sum+(discreteStock(p)?q:toBase(q,u));
  },0);
  const allocated=discreteStock(p)?allocatedBase:fromBase(allocatedBase,p.unit);
- if(totalInput.value===''||!Number.isFinite(total)){hint.textContent='Introduce la cantidad total aplicada para ver lo pendiente por asignar.';return}
+ if(totalInput.value===''||!Number.isFinite(total)){hint.textContent='FALTA ASIGNAR: introduce primero la cantidad total aplicada.';for(const line of lines){const x=line.querySelector('.multi-remaining-help');if(x)x.textContent='Introduce arriba el total para calcular lo que falta.';}return}
  const remaining=Number((total-allocated).toFixed(8));
- hint.textContent='TOTAL APLICADO: '+fmt(total)+' '+stockUnit(p)+' · REPARTIDO: '+fmt(allocated)+' '+stockUnit(p)+' · '+(remaining>=0?'FALTAN POR ASIGNAR: ':'EXCESO: ')+fmt(Math.abs(remaining))+' '+stockUnit(p);
+ hint.textContent=(remaining>0?'FALTAN POR ASIGNAR: ':remaining<0?'EXCESO ASIGNADO: ':'REPARTO COMPLETO: ')+fmt(Math.abs(remaining))+' '+stockUnit(p)+' · Total '+fmt(total)+' · Repartido '+fmt(allocated);
  hint.style.color=remaining<0?'#a53024':remaining===0?'#145443':'#965d08';
  hint.style.background=remaining<0?'#ffeae6':remaining===0?'#e9f7ee':'#fff3da';
  for(const line of lines){
   const qty=line.querySelector('[name=lineQty]'),lot=line.querySelector('[name=lineLot]');
-  if(!qty||!lot||lot.tagName!=='SELECT')continue;
-  // The total still to distribute is displayed separately from the lot's own stock.
-  const room=0;
+  if(!qty)continue;
   const notice=line.querySelector('.multi-remaining-help');
-  if(notice)notice.textContent='FALTAN por asignar del total: '+fmt(Math.max(0,remaining))+' '+stockUnit(p);
+  if(notice)notice.textContent=remaining<0?'EXCESO: '+fmt(Math.abs(remaining))+' '+stockUnit(p):remaining===0?'REPARTO COMPLETO: 0 '+stockUnit(p):'FALTAN POR ASIGNAR: '+fmt(remaining)+' '+stockUnit(p);
  }
 }
 function fillMultiFIFO(row){
@@ -682,14 +680,16 @@ function multiAddRow(){
  row.className='multi-row filetile';
  row.innerHTML='<div class="row between"><b class="multi-title">Producto '+(target.children.length+1)+'</b><button type="button" class="btn danger multi-remove">Quitar</button></div>'
  +'<div class="field"><label>Producto *</label><select name="lineProduct" required>'+productOptionsForKind(kind)+'</select></div>'
- +(entry||revision?'':'<div class="field" style="margin-top:12px"><label>1. Cantidad TOTAL utilizada de este producto *</label><input name="totalUsed" type="number" min="0.000001" step="any" inputmode="decimal" required placeholder="Ej.: 17"></div><div class="multi-pending notice" aria-live="polite" style="position:sticky;top:56px;z-index:5;background:#e9f7ee;color:#145443;font-weight:700;margin:9px 0">Faltan por asignar: introduce primero el total.</div><button type="button" class="btn alt multi-fifo" style="margin-bottom:12px">↧ Repartir automáticamente por antigüedad (FIFO)</button>')
+ +(entry||revision?'':'<div class="field" style="margin-top:12px"><label>1. Cantidad TOTAL utilizada de este producto *</label><input name="totalUsed" type="number" min="0.000001" step="any" inputmode="decimal" required placeholder="Ej.: 17"></div><div class="multi-pending notice" aria-live="polite" style="position:sticky;top:56px;z-index:5;background:#fff3da;color:#145443;font-weight:800;font-size:17px;border:2px solid #145443;margin:9px 0">Faltan por asignar: introduce primero el total.</div><button type="button" class="btn alt multi-fifo" style="margin-bottom:12px">↧ Repartir automáticamente por antigüedad (FIFO)</button>')
  +'<div class="multi-lot-list stack"></div>'
  +'<button type="button" class="btn alt multi-add-lot" style="margin-top:9px" '+(revision?'hidden':'')+'>＋ Añadir otra línea de '+(entry?'envases':'cantidad')+' y lote</button>'
  +'<div class="multi-pack field" style="display:none;margin-top:10px"><label>Contenido por envase comercial (solo si el formato no está identificado)</label><input name="linePack" type="number" min="0.000001" step="any" inputmode="decimal" disabled placeholder="Ej.: 5 para un envase de 5 L"></div>'
  +'<p class="muted small multi-hint"></p>';
  row.querySelector('.multi-remove').onclick=()=>{row.remove();[...target.children].forEach((el,i)=>el.querySelector('.multi-title').textContent='Producto '+(i+1));};
  row.querySelector('.multi-add-lot').onclick=()=>multiAddLotLine(row);
- const totalField=row.querySelector('[name=totalUsed]');if(totalField)totalField.oninput=()=>updateMultiPending(row);
+ const totalField=row.querySelector('[name=totalUsed]');if(totalField)totalField.addEventListener('input',()=>updateMultiPending(row));
+ // Event delegation also covers the very first lot line and every newly inserted line.
+ row.addEventListener('input',ev=>{if(ev.target.matches('[name=lineQty]')){const line=ev.target.closest('.multi-lot-line');if(line)updateMultiLotQuantityHint(row,line);updateMultiPending(row);}});
  const fifoButton=row.querySelector('.multi-fifo');if(fifoButton)fifoButton.onclick=()=>fillMultiFIFO(row);
  const refresh=()=>{const p=prod(row.querySelector('[name=lineProduct]').value),wrap=row.querySelector('.multi-pack'),packInput=wrap.querySelector('input');
   const pack=p&&!discreteStock(p)?commercialPack(p):null,needs=!!(entry&&p&&!discreteStock(p)&&!pack);
@@ -711,7 +711,7 @@ function multiAddLotLine(productRow){
  const unitChoices=U.map(u=>'<option value="'+esc(u)+'">'+esc(u)+'</option>').join('');
  line.innerHTML='<div class="stack" style="gap:8px"><div class="field"><label>Lote (opcional)</label>'+(entry||revision?'<input name="lineLot" type="text" maxlength="100" placeholder="Sin indicar">':'<select name="lineLot"><option value="">Selecciona lote (o FIFO)</option></select>')+'</div>'
  +(!entry&&!revision?'<div class="multi-lot-available notice" aria-live="polite">Selecciona un lote para ver sus existencias.</div>':'')
- +(!entry&&!revision?'<div class="muted small multi-remaining-help">Pendiente de asignar del total: —</div>':'')
+ +(!entry&&!revision?'<div class="multi-remaining-help" aria-live="polite" style="font-weight:800;font-size:16px;color:#145443;background:#fff3da;padding:11px;border-radius:8px">FALTAN POR ASIGNAR: introduce el total</div>':'')
  +'<div class="field" style="background:#f0f8f2;padding:12px;border:2px solid #145443;border-radius:12px"><label class="multi-qty-label" style="font-size:15px;color:#145443;font-weight:800">'+(entry?'Número de envases de este lote':revision?'Cantidad física contada':'2. CANTIDAD A DESCONTAR DE ESTE LOTE')+' *</label><input type="number" name="lineQty" style="background:white;border:2px solid #438467;font-size:20px;font-weight:700;min-height:56px" min="'+(revision?'0':entry?'1':'0.000001')+'" step="'+(entry?'1':'any')+'" required inputmode="'+(entry?'numeric':'decimal')+'" placeholder="'+(entry?'Nº de envases':'Escribe aquí lo gastado de ESTE lote')+'"></div></div>'
  +'<div class="row between" style="margin-top:7px"><div class="field" style="min-width:100px;flex:1"><label>Unidad de la cantidad</label><select name="lineUnit">'+unitChoices+'</select></div><button class="btn danger multi-remove-lot" type="button">Quitar línea</button></div>';
  line.querySelector('.multi-remove-lot').onclick=()=>{if(list.children.length===1){t('Debe quedar al menos una línea de cantidad por producto.','error');return;}line.remove();updateMultiLotChoices(productRow);updateMultiPending(productRow);};
@@ -721,6 +721,7 @@ function multiAddLotLine(productRow){
  unit.disabled=entry||discreteStock(p);
  updateMultiLotChoices(productRow);
  const qty=line.querySelector('[name=lineQty]');if(qty&&['tratamiento','salida'].includes(kind))qty.oninput=()=>{updateMultiLotQuantityHint(productRow,line);updateMultiPending(productRow)};
+ updateMultiPending(productRow);
 }
 function multiBuildMove(form,row,lotLine){
  const pid=row.querySelector('[name=lineProduct]').value,p=prod(pid);
