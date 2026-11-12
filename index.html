@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='82', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='83', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -437,12 +437,13 @@ function groupProductsFor(cid){
  for(const m of model.movements){if(m.customerId!==cid)continue;const p=prod(m.productId);if(!p)continue;const key=stockGroupKey(p);if(!grouped.has(key))grouped.set(key,p);}
  return [...grouped.values()].sort((a,b)=>stockProductName(a).localeCompare(stockProductName(b)));
 }
-function productOptionsForKind(kind,selectedId=''){
+function productOptionsForKind(kind,selectedId='',customerId=''){
  const purchase=kind==='entrada',items=model.products.filter(p=>(productActivated(p.id)&&!productHidden(p.id))||p.id===selectedId).sort((a,b)=>a.name.localeCompare(b.name));
  if(purchase)return '<option value="">Selecciona una presentación comercial</option>'+items.map(p=>`<option value="${esc(p.id)}" ${p.id===selectedId?'selected':''}>${esc(p.name)} (${esc(stockUnit(p))})${p.code?' · Ref. '+esc(p.code):''}</option>`).join('');
- const grouped=new Map();for(const p of items){const key=stockGroupKey(p);if(!grouped.has(key))grouped.set(key,p);}
+ const limited=['tratamiento','salida'].includes(kind)&&!!customerId;
+ const grouped=new Map();for(const p of items){const key=stockGroupKey(p);if(limited&&stockBase(customerId,p.id)<=0.000001)continue;if(!grouped.has(key))grouped.set(key,p);}
  const selected=prod(selectedId),chosen=selected?grouped.get(stockGroupKey(selected))?.id:'';
- return '<option value="">Selecciona un producto (sin presentación)</option>'+[...grouped.values()].sort((a,b)=>stockProductName(a).localeCompare(stockProductName(b))).map(p=>`<option value="${esc(p.id)}" ${p.id===chosen?'selected':''}>${esc(stockDisplayName(p))} (${esc(stockUnit(p))})</option>`).join('');
+ return '<option value="">'+(limited?'Selecciona un producto con existencias':'Selecciona un producto (sin presentación)')+'</option>'+[...grouped.values()].sort((a,b)=>stockProductName(a).localeCompare(stockProductName(b))).map(p=>`<option value="${esc(p.id)}" ${p.id===chosen?'selected':''}>${esc(stockDisplayName(p))} (${esc(stockUnit(p))})</option>`).join('');
 }
 function stockView(cid,pid){const p=prod(pid);return p?fmt(fromStockBase(stockBase(cid,pid),p))+' '+stockUnit(p):'—'}
 function signed(m){let p=prod(m.productId);if(!p)return '';let value=fromStockBase(movementStockDelta(m,p),p);return (value>0?'+':'')+fmt(value)+' '+stockUnit(p)}
@@ -674,7 +675,7 @@ function multiAddRow(){
  const kind=form.multiKind.value,entry=kind==='entrada',revision=kind==='revision',row=document.createElement('div');
  row.className='multi-row filetile';
  row.innerHTML='<div class="row between"><b class="multi-title">Producto '+(target.children.length+1)+'</b><button type="button" class="btn danger multi-remove">Quitar</button></div>'
- +'<div class="field"><label>Producto *</label><select name="lineProduct" required>'+productOptionsForKind(kind)+'</select></div>'
+ +'<div class="field"><label>Producto *</label><select name="lineProduct" required>'+productOptionsForKind(kind,'',selected)+'</select></div>'
  +(entry||revision?'':'<div class="field" style="margin-top:12px"><label>1. Cantidad TOTAL utilizada de este producto *</label><input name="totalUsed" type="number" min="0.000001" step="any" inputmode="decimal" required placeholder="Ej.: 17"></div><div class="multi-pending notice" aria-live="polite" style="position:sticky;top:56px;z-index:5;background:#f4f7ef;color:#145443;font-weight:700;padding:9px 11px;margin:7px 0">Pendiente de asignar: indica el total.</div><button type="button" class="btn alt multi-fifo" style="margin-bottom:12px">↧ Repartir automáticamente por antigüedad (FIFO)</button>')
  +'<div class="multi-lot-list stack"></div>'
  +'<button type="button" class="btn alt multi-add-lot" style="margin-top:9px" '+(revision?'hidden':'')+'>＋ Añadir otra línea de '+(entry?'envases':'cantidad')+' y lote</button>'
