@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='77', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='78', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -586,18 +586,26 @@ function multiForm(){
 function updateMultiLotQuantityHint(productRow,line){
  const p=prod(productRow.querySelector('[name=lineProduct]').value);
  const qty=line.querySelector('[name=lineQty]'),lot=line.querySelector('[name=lineLot]'),unit=line.querySelector('[name=lineUnit]');
- const label=line.querySelector('.multi-qty-label');
+ const hint=line.querySelector('.multi-lot-available');
  if(!p||!qty||!lot||lot.tagName!=='SELECT')return;
- const selectedLot=lot.value;
- const summary=lotSummary(selected,p.id);
- const found=selectedLot?summary.lots.find(x=>x.lot===selectedLot):null;
- const available=found?found.amount:stockBase(selected,p.id);
+ const chosen=lot.value,summary=lotSummary(selected,p.id);
+ const found=chosen?summary.lots.find(x=>x.lot===chosen):null;
  const shownUnit=unit.value||stockUnit(p);
- const amount=discreteStock(p)?available:fromBase(available,shownUnit);
- const detail=(found?'Disponible en este lote: ':'Disponible total: ')+fmt(amount)+' '+shownUnit;
- qty.placeholder=detail;
- qty.title=detail;
- if(label)label.textContent='Cantidad de producto · '+detail;
+ if(!found){
+  qty.removeAttribute('max');qty.placeholder='Introduce la cantidad';
+  if(hint)hint.textContent='Selecciona un lote para ver cuánto queda disponible. Si lo dejas sin indicar, se intentará aplicar FIFO.';
+  if(hint)hint.style.color='';
+  return;
+ }
+ const amount=discreteStock(p)?found.amount:fromBase(found.amount,shownUnit);
+ const available=Math.max(0,Number(amount.toFixed(8)));
+ qty.max=String(available);
+ qty.placeholder='Máximo '+fmt(available)+' '+shownUnit;
+ const excess=qty.value!==''&&Number(qty.value)>available+0.00000001;
+ if(hint){
+  hint.textContent='Disponible en el lote '+found.lot+': '+fmt(available)+' '+shownUnit+(excess?' · La cantidad introducida supera lo disponible.':'');
+  hint.style.color=excess?'#a53024':'#145443';
+ }
 }
 function updateMultiLotChoices(productRow){
  const form=$('multiMovement');if(!form)return;
@@ -655,8 +663,9 @@ function multiAddLotLine(productRow){
  line.className='multi-lot-line';line.style.cssText='padding:10px 0;border-bottom:1px solid #e5ece6';
  const label=entry?'Número de envases':revision?'Existencias físicas contadas':'Cantidad de producto';
  const unitChoices=U.map(u=>'<option value="'+esc(u)+'">'+esc(u)+'</option>').join('');
- line.innerHTML='<div class="fields"><div class="field"><label class="multi-qty-label">'+label+' *</label><input type="number" name="lineQty" min="'+(revision?'0':entry?'1':'0.000001')+'" step="'+(entry?'1':'any')+'" required inputmode="'+(entry?'numeric':'decimal')+'" placeholder="'+(entry?'Nº de envases':'Cantidad')+'"></div>'
- +'<div class="field"><label>Lote (opcional)</label>'+(entry||revision?'<input name="lineLot" type="text" maxlength="100" placeholder="Sin indicar">':'<select name="lineLot"><option value="">Sin indicar (FIFO si es posible)</option></select>')+'</div></div>'
+ line.innerHTML='<div class="stack" style="gap:8px"><div class="field"><label>Lote (opcional)</label>'+(entry||revision?'<input name="lineLot" type="text" maxlength="100" placeholder="Sin indicar">':'<select name="lineLot"><option value="">Selecciona lote (o FIFO)</option></select>')+'</div>'
+ +(!entry&&!revision?'<div class="multi-lot-available notice" aria-live="polite">Selecciona un lote para ver sus existencias.</div>':'')
+ +'<div class="field"><label class="multi-qty-label">'+label+' *</label><input type="number" name="lineQty" min="'+(revision?'0':entry?'1':'0.000001')+'" step="'+(entry?'1':'any')+'" required inputmode="'+(entry?'numeric':'decimal')+'" placeholder="'+(entry?'Nº de envases':'Cantidad')+'"></div></div>'
  +'<div class="row between" style="margin-top:7px"><div class="field" style="min-width:100px;flex:1"><label>Unidad de la cantidad</label><select name="lineUnit">'+unitChoices+'</select></div><button class="btn danger multi-remove-lot" type="button">Quitar línea</button></div>';
  line.querySelector('.multi-remove-lot').onclick=()=>{if(list.children.length===1){t('Debe quedar al menos una línea de cantidad por producto.','error');return;}line.remove();updateMultiLotChoices(productRow);};
  list.appendChild(line);
@@ -664,6 +673,7 @@ function multiAddLotLine(productRow){
  if(p)unit.value=discreteStock(p)?'ud.':p.unit;
  unit.disabled=entry||discreteStock(p);
  updateMultiLotChoices(productRow);
+ const qty=line.querySelector('[name=lineQty]');if(qty&&['tratamiento','salida'].includes(kind))qty.oninput=()=>updateMultiLotQuantityHint(productRow,line);
 }
 function multiBuildMove(form,row,lotLine){
  const pid=row.querySelector('[name=lineProduct]').value,p=prod(pid);
