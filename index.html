@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='94', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='95', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -617,18 +617,41 @@ function eligiblePurchasesForPending(pending){
  const key=stockGroupKey(p);
  return model.movements.filter(m=>m.kind==='entrada'&&m.customerId===pending.customerId&&!!m.lot&&stockGroupKey(prod(m.productId))===key&&availablePurchaseForPending(m)>0.000001);
 }
-function pendingRegularizationPanel(cid){
- const pending=model.movements.filter(m=>m.customerId===cid&&m.pendingPurchase&&['tratamiento','salida'].includes(m.kind)&&m.delta<0);
- if(!pending.length)return '';
- return '<div class="card" style="margin:13px 0;border:1px solid #e4c58a"><h3>Movimientos pendientes de regularizar</h3><p class="muted small">Selecciona una o varias compras y reparte entre sus lotes la cantidad pendiente. El tratamiento no se descuenta de nuevo. La parte no vinculada seguirá pendiente.</p>'
- +pending.map(m=>{
-  const p=prod(m.productId),options=eligiblePurchasesForPending(m),amount=Math.abs(m.delta);
-  return '<div class="filetile" style="margin-top:10px"><b>'+esc(stockDisplayName(p))+'</b> · Aplicación '+esc(m.date)+'<p class="small">Por regularizar: <b>'+esc(fmt(fromStockBase(amount,p))+' '+stockUnit(p))+'</b></p>'
-   +(options.length?'<form class="regularize-pending-form stack" data-pending-id="'+esc(m.id)+'"><div class="regularize-rows stack"></div><div class="regularize-remaining notice" aria-live="polite">Pendiente: '+esc(fmt(fromStockBase(amount,p))+' '+stockUnit(p))+'</div><button type="button" class="btn alt regularize-add">＋ Añadir otro lote</button><button type="submit" class="btn">Confirmar reparto de lotes</button></form>'
-   :'<div class="notice">No hay compras con lote y saldo disponible para vincular. Registra primero una compra real con su lote.</div>')
-   +'</div>';
- }).join('')+'</div>';
+function pendingPurchaseState(){
+ const remaining=new Map(),queues=new Map(),first=new Map();
+ model.movements.forEach((m,i)=>{const key=m.operationId||m.id;if(!first.has(key))first.set(key,i)});
+ const timeline=model.movements.map((m,i)=>({m,i})).sort((a,b)=>first.get(a.m.operationId||a.m.id)-first.get(b.m.operationId||b.m.id)||a.i-b.i);
+ for(const {m} of timeline){
+  const p=prod(m.productId);if(!p||!m.customerId)continue;
+  const key=m.customerId+'::'+stockGroupKey(p);
+  if(!queues.has(key))queues.set(key,[]);
+  const queue=queues.get(key);
+  if(m.pendingPurchase&&['tratamiento','salida'].includes(m.kind)&&m.delta<0){
+   const amount=-m.delta;
+   remaining.set(m.id,amount);queue.push({id:m.id,amount});
+  }else if(m.kind==='entrada'){
+   const linked=model.movements.filter(x=>x.linkedPurchaseId===m.id).reduce((n,x)=>n+Math.max(0,-movementStockDelta(x,prod(x.productId))),0);
+   let credit=Math.max(0,movementStockDelta(m,p)-linked);
+   for(const debt of queue){
+    if(credit<=0.000001)break;
+    const paid=Math.min(debt.amount,credit);
+    debt.amount-=paid;credit-=paid;
+    remaining.set(debt.id,Math.max(0,debt.amount));
+   }
+  }
+ }
+ return remaining;
 }
+function pendingRegularizationPanel(cid){
+ const balances=pendingPurchaseState();
+ const pending=model.movements.filter(m=>m.customerId===cid&&m.pendingPurchase&&m.delta<0&&(balances.get(m.id)||0)>0.000001);
+ const unbatched=model.movements.filter(m=>m.customerId===cid&&!m.lot&&['entrada','tratamiento','salida'].includes(m.kind)).length;
+ const info=unbatched?'<p class="muted small" style="margin:9px 0">ⓘ '+unbatched+' movimientos sin lote. La asignación de lotes es opcional.</p>':'';
+ if(!pending.length)return info;
+ return '<div class="notice" style="margin:10px 0"><b>Compras pendientes de cubrir</b><p class="muted small">Las compras posteriores compensan automáticamente el déficit, tengan lote o no. No hay que volver a descontar la aplicación.</p>'
+ +pending.map(m=>{const p=prod(m.productId);return '<p class="small">'+esc(stockDisplayName(p))+' · pendiente '+esc(fmt(fromStockBase(balances.get(m.id),p))+' '+stockUnit(p))+'</p>'}).join('')+'</div>'+info;
+}
+
 function regularizationRowInfo(form){
  const m=model.movements.find(x=>x.id===form.dataset.pendingId);
  if(!m)return null;
@@ -734,7 +757,43 @@ else if(customerTab==='planes')content=clientPlansPanel(c.id);
     else if(customerTab==='alertas')content=alertsList(c.id);
 else{let docs=model.documents.filter(x=>x.customerId===c.id);content=docs.length?docs.map(d=>documentTile(d)).join(''):'<div class="empty">Sin fotografías archivadas.</div>'}
 return `<div class="row between"><div>${head(esc(c.commercialName||c.name),[c.ref,c.place].filter(Boolean).map(esc).join(' · '))}</div><button class="btn alt" data-nav="clientes">← Clientes</button></div><div class="card">${c.phone||c.email||c.lastPurchase?`<p class="muted small">Contacto: ${esc(c.phone||"—")}${c.phone2?" · "+esc(c.phone2):""}${c.email?" · "+esc(c.email):""}${c.lastPurchase?" · Última venta Carballa: "+esc(c.lastPurchase):""}</p>`:""}<div class="actions" style="margin:0 0 13px">${clientArchived(c.id)?'<span class="pill warn">Cliente dado de baja · solo consulta de historial</span>':'<button class="btn" data-add="entrada">+ Compra</button>'}${clientArchived(c.id)?'':'<button class="btn" data-add="tratamiento">− Aplicación</button><button class="btn alt" data-add="revision">⌕ Revisión</button><button class="btn alt" data-add="salida">− Otra salida</button>'}<button class="btn alt" data-client-plan="1">🌿 Plan de abonado</button><button class="btn alt" data-export-client="${c.id}">Compartir cliente</button><button class="btn alt" data-nav="documentos">📷 Fotografía</button><button class="btn alt" data-nav="visitas">📝 Visita</button><button class="btn alt" data-nav="pedidos">🛒 Pedido</button><button class="btn alt" data-nav="alertas">⏰ Alertas</button><button class="btn alt" data-client-status="${c.id}" data-archived="${clientArchived(c.id)?'0':'1'}">${clientArchived(c.id)?'↩ Reactivar cliente':'Archivar / dar de baja'}</button></div><div class="tabs">${tabs.map(([s,n])=>`<button class="${customerTab===s?'selected':''}" data-ctab="${s}">${n}</button>`).join('')}</div>${pendingAction&&pendingAction.customerId===c.id?`<div class="card" id="activeMovementPanel" style="margin:14px 0;scroll-margin-top:78px"><div class="row between"><h2>Registrar ${pendingAction.kind==='entrada'?'compra':pendingAction.kind==='tratamiento'?'aplicación':pendingAction.kind==='revision'?'revisión de almacén':'movimiento'}</h2><button class="btn alt" type="button" id="cancelClientMovement">Cancelar</button></div>${multiForm()}</div>`:''}${content}</div>`}
-function movementTable(arr,withClient=false){if(!arr.length)return '<div class="empty">No hay movimientos registrados.</div>';return `<div class="tablewrap"><table><thead><tr><th>Fecha</th>${withClient?'<th>Cliente</th>':''}<th>Operación</th><th>Producto</th><th>Cantidad</th><th>Lote</th><th>Notas</th></tr></thead><tbody>${arr.map(m=>`<tr><td>${esc(m.date)}</td>${withClient?`<td>${esc(cName(m.customerId))}</td>`:''}<td><span class="pill ${m.kind==='tratamiento'?'warn':m.kind==='revision'?'red':''}">${({entrada:'Compra/entrada',tratamiento:'Aplicación',revision:'Ajuste revisión',salida:'Otra salida'})[m.kind]||esc(m.kind)}</span></td><td>${esc(m.kind==='entrada'?pName(m.productId):stockDisplayName(prod(m.productId)))}</td><td><b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?esc(discreteStock(prod(m.productId))?fmt(m.packCount)+' '+stockUnit(prod(m.productId))+' (formato comercial)':fmt(m.packCount)+' envase'+(m.packCount===1?'':'s')+(m.packSize?' × '+fmt(m.packSize)+' '+(prod(m.productId)?.unit||m.qtyUnit):'')):signed(m)}</b>${m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?'<div class="muted small">Total almacén: '+esc(signed(m))+'</div>':''}</td><td class="small">${esc(m.lot||'—')}${m.pendingPurchase?'<div class="pill red" style="margin-top:4px">Pendiente de confirmar compra y asignar lote</div>':m.linkedPurchaseId?'<div class="pill" style="margin-top:4px">Regularizado con compra</div>':''}</td><td class="small">${esc(m.notes||'')}${m.plot?` · Parcela: ${esc(m.plot)}`:''}${m.area?` · ${fmt(m.area)} ha`:''}</td></tr>`).join('')}</tbody></table></div>`}
+function movementTable(arr,withClient=false){
+ if(!arr.length)return '<div class="empty">No hay movimientos registrados.</div>';
+ const grouped=new Map(),balances=pendingPurchaseState();
+ for(const m of arr){
+  const p=prod(m.productId),out=['tratamiento','salida'].includes(m.kind);
+  const key=out&&m.operationId&&p?m.operationId+'::'+m.customerId+'::'+stockGroupKey(p)+'::'+m.kind:m.id;
+  if(!grouped.has(key))grouped.set(key,[]);
+  grouped.get(key).push(m);
+ }
+ const position=new Map(model.movements.map((m,i)=>[m.id,i]));
+ const rows=[...grouped.values()].sort((a,b)=>Math.min(...b.map(x=>position.get(x.id)??0))-Math.min(...a.map(x=>position.get(x.id)??0)));
+ return '<div class="tablewrap"><table><thead><tr><th>Fecha</th>'+(withClient?'<th>Cliente</th>':'')+'<th>Operación</th><th>Producto</th><th>Cantidad</th><th>Lote</th><th>Notas</th></tr></thead><tbody>'+rows.map(group=>{
+  const m=group[0],p=prod(m.productId),out=['tratamiento','salida'].includes(m.kind);
+  const total=group.reduce((n,x)=>n+Math.abs(movementStockDelta(x,prod(x.productId))),0);
+  const oldDeficit=group.filter(x=>x.pendingPurchase).reduce((n,x)=>n+Math.abs(movementStockDelta(x,prod(x.productId))),0);
+  const still=group.reduce((n,x)=>n+(balances.get(x.id)||0),0);
+  const originallyCovered=Math.max(0,total-oldDeficit);
+  const batchNames=[...new Set(group.map(x=>x.lot).filter(Boolean))];
+  const lotLabel=batchNames.length===0?'Sin lote (opcional)':batchNames.length===1?batchNames[0]:batchNames.length+' lotes';
+  const amount=out?'−'+fmt(fromStockBase(total,p))+' '+stockUnit(p):
+    m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?
+    (discreteStock(p)?fmt(m.packCount)+' '+stockUnit(p)+' (formato comercial)':fmt(m.packCount)+' envase'+(m.packCount===1?'':'s')+(m.packSize?' × '+fmt(m.packSize)+' '+(p?.unit||m.qtyUnit):'')):signed(m);
+  let detail='';
+  if(oldDeficit>0.000001){
+   detail='<div class="muted small">Al aplicar: '+esc(fmt(fromStockBase(originallyCovered,p))+' '+stockUnit(p))+' con existencias · '+esc(fmt(fromStockBase(oldDeficit,p))+' '+stockUnit(p))+' por confirmar compra</div>';
+   detail+=still>0.000001?'<div class="pill red" style="display:inline-block;margin-top:4px">Pendiente compra: '+esc(fmt(fromStockBase(still,p))+' '+stockUnit(p))+'</div>':'<div class="muted small">Déficit cubierto por compras posteriores</div>';
+  }
+  if(group.length>1)detail+='<details style="margin-top:5px"><summary class="muted small" style="cursor:pointer">Ver desglose ('+group.length+' líneas)</summary>'+group.map(x=>'<div class="muted small">'+esc(fmt(fromStockBase(Math.abs(movementStockDelta(x,prod(x.productId))),p))+' '+stockUnit(p)+' · '+(x.lot?'Lote '+x.lot:'Sin lote'))+'</div>').join('')+'</details>';
+  return '<tr><td>'+esc(m.date)+'</td>'+(withClient?'<td>'+esc(cName(m.customerId))+'</td>':'')
+   +'<td><span class="pill '+(m.kind==='tratamiento'?'warn':m.kind==='revision'?'red':'')+'">'+esc(({entrada:'Compra/entrada',tratamiento:'Aplicación',revision:'Ajuste revisión',salida:'Otra salida'})[m.kind]||m.kind)+'</span></td>'
+   +'<td>'+esc(m.kind==='entrada'?pName(m.productId):stockDisplayName(p))+'</td>'
+   +'<td><b>'+esc(amount)+'</b>'+(m.kind==='entrada'&&Number.isFinite(m.packCount)&&m.packCount>0?'<div class="muted small">Total almacén: '+esc(signed(m))+'</div>':'')+detail+'</td>'
+   +'<td class="small">'+esc(lotLabel)+(batchNames.length&&group.some(x=>!x.lot)?'<div class="muted small">Y parte sin lote</div>':'')+'</td>'
+   +'<td class="small">'+esc(m.notes||'')+(m.plot?' · Parcela: '+esc(m.plot):'')+(m.area?' · '+fmt(m.area)+' ha':'')+'</td></tr>';
+ }).join('')+'</tbody></table></div>';
+}
+
 function productsScreen(){return `${head('Productos','Gestiona tus productos incorporados y consulta el catálogo Carballa.')}<div class="grid"><div class="full card">${myProductsPanel()}</div><div class="full card"><h2>Catálogo de productos</h2><p class="muted">Busca en Carballa, consulta los ocultos o crea manualmente un artículo de otro proveedor.</p>${productCatalogList()}<details style="margin-top:18px"><summary style="cursor:pointer;font-weight:700">＋ Añadir producto manualmente (fuera de Carballa)</summary><div style="margin-top:12px"><form id="createProduct" class="stack">${input('Nombre comercial *','name','text','','required maxlength="150"')}${select('Categoría *','category',[['fitosanitario','Fitosanitario'],['fertilizante','Fertilizante'],['enmienda','Enmienda'],['difusor','Difusor'],['semillas','Semillas (stock en envases)'],['material','Material y artículos por unidades'],['otro','Otro']].map(([v,l])=>`<option value="${v}">${l}</option>`).join(''))}${select('Unidad de stock *','unit',U.map(x=>`<option value="${x}">${x}</option>`).join(''))}${input('Nº registro MAPA (fitosanitarios)','registration','text','','maxlength="30"')}<button class="btn">Añadir producto manualmente</button></form></div></details><div class="notice">Los formatos comerciales distintos se mantienen como artículos separados. El stock se contabiliza en unidades reales.</div></div></div>`}
 function movementScreen(){return selected&&cust(selected)?detail():customersScreen()}
 
