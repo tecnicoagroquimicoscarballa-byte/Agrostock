@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='61', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='62', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -716,7 +716,7 @@ if(found){out.push(String(value+group));i=j;}else{out.push(words[i++]);}
 return out.join(' ');
 }
 function interpret(raw){let s=raw.trim(),n=spokenNumbers(s);if(!s)throw Error('Escribe o dicta una orden.');let query=n.match(/^(?:consultar|mostrar|ver|cuanto|que tiene|stock|existencias)(?: el)?(?: stock| existencias)?(?: de| para)? (.+)$/);if(!query&&/^(consultar|mostrar|ver|stock|existencias)(?: el)?(?: stock| existencias)?$/.test(n)&&$('quickCustomer')?.value){const candidate=cust($('quickCustomer').value);if(candidate&&!clientArchived(candidate.id))return {view:true,customerId:candidate.id};}if(query){let c=findByName(model.customers,query[1]);if(!c)throw Error('No encuentro el cliente. Usa su nombre exacto.');return {view:true,customerId:c.id}}
-let kind=/\b(revision|recuento|quedan|queda|hay en almacen)\b/.test(n)?'revision':/\b(tratamiento|tratar|aplico|aplicado|aplicar|aplicacion|abonado|abonar|fertilizacion|fertilizar|enmienda|consumio|gasto|descontar|instalo|instalado)\b/.test(n)?'tratamiento':/\b(anadir|agregar|compr|entrada|recib|sumar|incorporar)\b/.test(n)?'entrada':null;if(!kind)throw Error('No identifiqué la operación. Prueba «Añadir», «Aplicación» o «Revisión».');
+let kind=/\b(revision|recuento|quedan|queda|hay en almacen)\b/.test(n)?'revision':/\b(tratamiento|tratar|aplico|aplicado|aplicar|aplicacion|abonado|abonar|fertilizacion|fertilizar|enmienda|consumio|gasto|instalo|instalado)\b/.test(n)?'tratamiento':/\b(restar|resto|resta|restado|eliminar|elimino|elimina|eliminado|quitar|quito|quita|retirar|retiro|retira|retirado|descontar|descuento|descuenta|sacar|saco|salida)\b/.test(n)?'salida':/\b(anadir|anado|anade|anadido|agregar|agrego|agrega|comprar|compro|compra|comprado|comprados|compre|compramos|entrada|recib|sumar|sumo|suma|incorporar)\b/.test(n)?'entrada':null;if(!kind)throw Error('No identifiqué la operación. Prueba «Añadir», «Comprar», «Restar», «Eliminar», «Aplicación» o «Revisión».');
 let customer=model.customers.filter(c=>!clientArchived(c.id)&&n.includes(norm(c.name))).sort((a,b)=>b.name.length-a.name.length)[0];if(!customer&&$('quickCustomer')?.value)customer=cust($('quickCustomer').value);if(!customer||clientArchived(customer.id))throw Error('No identifiqué un cliente activo. Selecciónalo en Productor o indica su nombre.');const included=model.products.filter(p=>productActivated(p.id)&&!productHidden(p.id));
 const matchesProduct=included.filter(p=>{
  const terms=[p.name,stockProductName(p),stockDisplayName(p),productMapping(p)?.familyName].filter(Boolean).map(norm);
