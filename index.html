@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='59', APP_RELEASE_DATE='11/11/2026';
+const APP_RELEASE='60', APP_RELEASE_DATE='11/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -717,7 +717,21 @@ return out.join(' ');
 }
 function interpret(raw){let s=raw.trim(),n=spokenNumbers(s);if(!s)throw Error('Escribe o dicta una orden.');let query=n.match(/^(?:consultar|mostrar|ver|cuanto|que tiene|stock|existencias)(?: el)?(?: stock| existencias)?(?: de| para)? (.+)$/);if(!query&&/^(consultar|mostrar|ver|stock|existencias)(?: el)?(?: stock| existencias)?$/.test(n)&&$('quickCustomer')?.value){const candidate=cust($('quickCustomer').value);if(candidate&&!clientArchived(candidate.id))return {view:true,customerId:candidate.id};}if(query){let c=findByName(model.customers,query[1]);if(!c)throw Error('No encuentro el cliente. Usa su nombre exacto.');return {view:true,customerId:c.id}}
 let kind=/\b(revision|recuento|quedan|queda|hay en almacen)\b/.test(n)?'revision':/\b(tratamiento|tratar|aplico|aplicado|aplicar|aplicacion|abonado|abonar|fertilizacion|fertilizar|enmienda|consumio|gasto|descontar|instalo|instalado)\b/.test(n)?'tratamiento':/\b(anadir|agregar|compr|entrada|recib|sumar|incorporar)\b/.test(n)?'entrada':null;if(!kind)throw Error('No identifiqué la operación. Prueba «Añadir», «Aplicación» o «Revisión».');
-let customer=model.customers.filter(c=>!clientArchived(c.id)&&n.includes(norm(c.name))).sort((a,b)=>b.name.length-a.name.length)[0];if(!customer&&$('quickCustomer')?.value)customer=cust($('quickCustomer').value);if(!customer||clientArchived(customer.id))throw Error('No identifiqué un cliente activo. Selecciónalo en Productor o indica su nombre.');let product=model.products.filter(p=>n.includes(norm(p.name))).sort((a,b)=>b.name.length-a.name.length)[0];if(!product)throw Error('No identifiqué el producto. Debe estar creado en el catálogo y escrito con su nombre.');
+let customer=model.customers.filter(c=>!clientArchived(c.id)&&n.includes(norm(c.name))).sort((a,b)=>b.name.length-a.name.length)[0];if(!customer&&$('quickCustomer')?.value)customer=cust($('quickCustomer').value);if(!customer||clientArchived(customer.id))throw Error('No identifiqué un cliente activo. Selecciónalo en Productor o indica su nombre.');const included=model.products.filter(p=>productActivated(p.id)&&!productHidden(p.id));
+const matchesProduct=included.filter(p=>{
+ const terms=[p.name,stockProductName(p),stockDisplayName(p),productMapping(p)?.familyName].filter(Boolean).map(norm);
+ return terms.some(t=>t.length>=3&&(' '+n+' ').includes(' '+t+' '));
+}).sort((a,b)=>norm(stockDisplayName(b)).length-norm(stockDisplayName(a)).length||a.name.localeCompare(b.name));
+let product=matchesProduct[0];
+if(!product)throw Error('No encuentro ese producto entre los incorporados. Busca el nombre principal en Productos y comprueba que esté incorporado.');
+if(kind==='entrada'){
+ const family=stockGroupKey(product),sameFamily=matchesProduct.filter(p=>stockGroupKey(p)===family);
+ if(sameFamily.length>1){
+  const exact=sameFamily.filter(p=>(' '+n+' ').includes(' '+norm(p.name)+' '));
+  if(exact.length===1)product=exact[0];
+  else throw Error('Reconocí '+stockDisplayName(product)+', pero hay varias presentaciones. Para una compra debes indicar el formato exacto; abre la ficha del cliente y selecciona la presentación comercial.');
+ }
+}
 let match=n.match(/(\d+(?:[.,]\d+)?)\s*(kg|kilos?|kilogramos?|g|gramos?|l|litros?|cm3|cc|centimetros cubicos|ud\.?|unidades?|difusores?)/i);
 let packages=n.match(/(\d+(?:[.,]\d+)?)\s*(?:garrafas?|botellas?|envases?|cajas?|bolsas?|paquetes?)\s*(?:de|con)\s*(\d+(?:[.,]\d+)?)\s*(kg|kilos?|g|gramos?|l|litros?|cm3|cc|centimetros cubicos|ud\.?|unidades?|difusores?)/i);
 if(packages)match=[null,String(num(packages[1])*num(packages[2])),packages[3]];
@@ -741,9 +755,8 @@ let r=interpret($('command').value);
 if(r.view){out.innerHTML=`<div class="alert good"><b>${esc(cName(r.customerId))}</b><br>${productsFor(r.customerId).map(p=>`${esc(stockDisplayName(p))}: ${stockView(r.customerId,p.id)}`).join('<br>')||'Sin existencias'}</div><button class="btn alt" id="gotoResult">Abrir ficha</button>`;$('gotoResult').onclick=()=>{selected=r.customerId;customerTab='stock';navigate('cliente')}}
 else{
 pendingAction=r;
-const unit=prod(r.productId)?.unit||r.qtyUnit;
-const before=stockBase(r.customerId,r.productId);
-const quantity=toBase(r.qty,r.qtyUnit);
+const p=prod(r.productId),unit=stockUnit(p),before=stockBase(r.customerId,r.productId);
+const quantity=discreteStock(p)?r.qty:toBase(r.qty,r.qtyUnit);
 const after=r.kind==='revision'?quantity:before+(r.kind==='entrada'?quantity:-quantity);
 out.innerHTML=`<div class="alert good"><b>Orden reconocida: comprueba los datos</b><br>${esc(r.kind)} · ${esc(cName(r.customerId))}<br>${esc(pName(r.productId))} · ${fmt(r.qty)} ${esc(r.qtyUnit)}<br>Stock actual: ${fmt(fromBase(before,unit))} ${esc(unit)}<br><strong>Stock después: ${fmt(fromBase(after,unit))} ${esc(unit)}</strong></div><div class="actions"><button class="btn" id="confirmSpoken">✅ Confirmar y guardar ahora</button><button class="btn alt" id="gotoMovement">✏️ Revisar en formulario</button></div>`;
 $('confirmSpoken').onclick=()=>confirmSpokenMovement(r);
