@@ -629,7 +629,7 @@ function updateMultiLotChoices(productRow){
   const choices='<option value="">Sin indicar (FIFO si es posible)</option>'+lots.filter(x=>x.lot===own||!taken.has(x.lot.toLowerCase())).map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+'</option>').join('');
   select.innerHTML=choices;
   if(lots.some(x=>x.lot===own))select.value=own;
-  select.onchange=()=>updateMultiLotChoices(productRow);
+  select.onchange=()=>{updateMultiLotChoices(productRow);const amount=line.querySelector('[name=lineQty]');if(amount){amount.scrollIntoView({block:'center',behavior:'smooth'});amount.focus({preventScroll:true});}};
   line.querySelector('[name=lineUnit]').onchange=()=>updateMultiLotQuantityHint(productRow,line);
   updateMultiLotQuantityHint(productRow,line);
  }
