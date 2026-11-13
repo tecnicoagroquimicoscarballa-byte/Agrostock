@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='103', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='104', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -1211,7 +1211,13 @@ async function multiSubmit(e){
    moves=expanded;
   }
  }catch(err){return t(err.message,'error');}
- const summary=moves.map(m=>stockDisplayName(prod(m.productId))+': '+(m.kind==='entrada'?'+':'−')+fmt(fromStockBase(Math.abs(m.delta),prod(m.productId)))+' '+stockUnit(prod(m.productId))+' · '+(m.pendingPurchase?'PENDIENTE COMPRA Y LOTE':'lote '+(m.lot||'sin indicar'))).join('\n');
+ const summary=moves.map(m=>{
+  const p=prod(m.productId),unit=stockUnit(p),observed=fromStockBase(Number(m.after??(Number(m.before||0)+Number(m.delta||0))),p),diff=fromStockBase(Number(m.delta||0),p);
+  return stockDisplayName(p)+': '+(m.kind==='revision'?
+   'REVISIÓN · Observado '+fmt(observed)+' '+unit+' · Antes '+fmt(fromStockBase(Number(m.before||0),p))+' '+unit+' · Ajuste '+(diff>0?'+':'')+fmt(diff)+' '+unit:
+   (m.kind==='entrada'?'+':'−')+fmt(fromStockBase(Math.abs(m.delta),p))+' '+unit)
+   +' · lote '+(m.lot||'sin indicar')+(m.pendingPurchase?' · PENDIENTE COMPRA':'');
+ }).join('\n');
  if(!confirm('Cliente: '+cName(selected)+'\n'+summary+'\n\n¿Confirmas guardar la operación completa?'))return;
  const op=id(),registered=stamp(),before=model.movements.length;
  const offerLots=moves.some(m=>m.kind==='entrada'&&optionalLotTargets(selected,m.productId).length>0);
@@ -1433,7 +1439,7 @@ async function submitMovement(e){
  msg+='\\n'+moves.map(x=>(x.lot||'Sin lote')+': '+fmt(x.qty)+' '+x.qtyUnit).join('\\n');
  msg+='\\nAntes: '+fmt(fromStockBase(m.before,p))+' '+base+'\\nDespués: '+fmt(fromStockBase(remaining,p))+' '+base;
  if(m.kind==='entrada')msg+='\\nEnvases comerciales: '+fmt(m.packCount);
- if(m.kind==='revision')msg+='\\nDiferencia de revisión: '+fmt(fromStockBase(m.delta,p))+' '+base;
+ if(m.kind==='revision')msg+='\\nDiferencia de revisión: '+(m.delta>0?'+':'')+fmt(fromStockBase(m.delta,p))+' '+base;
  if(remaining<0)msg+='\\n\\nATENCIÓN: quedará stock negativo.';
  if(!confirm(msg+'\\n\\n¿Confirmas guardar '+moves.length+' movimiento(s) de esta operación?'))return;
  const operationId=id(),recorded=stamp(),originalLength=model.movements.length;
