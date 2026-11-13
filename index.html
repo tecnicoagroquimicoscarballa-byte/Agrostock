@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='107', APP_RELEASE_DATE='13/11/2026';
+const APP_RELEASE='108', APP_RELEASE_DATE='13/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -48,11 +48,38 @@ function loadGoogleIdentity(){return new Promise((res,rej)=>{if(window.google?.a
 async function driveConnect(){if(!navigator.onLine)return t('Para conectar Google Drive necesitas internet','error');driveStatus='Preparando autorización…';render();try{if(!window.google?.accounts?.oauth2)throw Error('El servicio de Google aún no está cargado; espera unos segundos y vuelve a pulsar');driveTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_OAUTH_CLIENT_ID,scope:'https://www.googleapis.com/auth/drive.appdata',...(driveLoginHint?{login_hint:driveLoginHint}:{}),callback:async r=>{if(r.error){driveStatus='Error de autorización: '+r.error;render();return}driveAccessToken=r.access_token;driveTokenExpires=Date.now()+(Number(r.expires_in)||3600)*1000;driveStatus='Autorizado; comprobando acceso a appDataFolder…';render();try{let response=await fetch('https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=nextPageToken,files(id,name)&page_size=10',{headers:{Authorization:'Bearer '+driveAccessToken}});if(!response.ok)throw Error('Drive API HTTP '+response.status);let data=await response.json();driveStatus='Conexión comprobada. Archivos propios visibles: '+(data.files?.length||0)+'.';if(autoSyncEnabled)syncAutoSchedule(1200);drivePreferred=true;try{localStorage.setItem(DRIVE_PREF_KEY,'1')}catch(e){}}catch(e){driveStatus='Autorización concedida, pero fallo de API: '+e.message}render()}});driveTokenClient.requestAccessToken({prompt:'',...(driveLoginHint?{login_hint:driveLoginHint}:{})})}catch(e){driveStatus='No conectado: '+e.message;render()}}
 
 const SYNC_NAME='agrostock-sync-v1.json',SYNC_KEYS=['customers','products','movements','documents','plans','visits','orders','alerts','clientStatuses','productStatuses','productSelections','customerDirectory','productMappings'];
-let syncBusy=false,syncMessage='Todavía no se ha sincronizado en esta sesión.',autoSyncTimer=null,autoSyncPending=false,autoSyncLastSuccess='';
+let syncBusy=false,syncMessage='Todavía no se ha sincronizado en esta sesión.',autoSyncTimer=null,autoSyncPending=false,autoSyncLastSuccess='',pendingAppRelease=0;
 const SYNC_DIRTY_KEY='agrostock-pending-upload-v1';
 let syncDirty=false;
 try{syncDirty=localStorage.getItem(SYNC_DIRTY_KEY)==='1'}catch(e){}
 function markSyncDirty(v){syncDirty=!!v;try{localStorage.setItem(SYNC_DIRTY_KEY,syncDirty?'1':'0')}catch(e){}}
+// La versión del código NO es la versión de la base de datos.
+// Drive publica el máximo; solamente los equipos que se quedan atrás actualizan.
+// Evita interrumpir un formulario sin guardar y nunca retrocede de versión.
+function appReleaseNumber(value){const n=Number(value);return Number.isInteger(n)&&n>0&&n<100000?n:0;}
+function publishAppRelease(snapshot,remote=null){
+ return {...snapshot,appRelease:Math.max(appReleaseNumber(APP_RELEASE),appReleaseNumber(model.appRelease),appReleaseNumber(snapshot.appRelease),appReleaseNumber(remote?.appRelease))};
+}
+function activeEditingForm(){
+ const el=document.activeElement;
+ return !!pendingAction||!!(el&&['INPUT','TEXTAREA','SELECT'].includes(el.tagName)&&el.closest('form'))||
+  !!document.querySelector('dialog[open]')||!!document.querySelector('.multi-row input:focus');
+}
+function maybeUpgradeAppFromSync(){
+ const wanted=Math.max(pendingAppRelease,appReleaseNumber(model.appRelease));
+ if(wanted<=appReleaseNumber(APP_RELEASE)||!navigator.onLine||!autoSyncEnabled)return;
+ if(activeEditingForm()){
+  syncMessage+=' Versión '+wanted+' disponible; se actualizará cuando termines el formulario.';
+  return;
+ }
+ const attemptKey='agrostock-upgrade-attempt-'+wanted;
+ let last=0;try{last=Number(sessionStorage.getItem(attemptKey)||0)}catch(e){}
+ if(Date.now()-last<5*60*1000)return;
+ try{sessionStorage.setItem(attemptKey,String(Date.now()))}catch(e){}
+ // Service worker valida que el servidor realmente tenga esa versión;
+ // si GitHub Pages aún no está publicado, conserva la actual.
+ window.location.href='./?actualizar=sync&minVersion='+wanted+'&t='+Date.now();
+}
 function syncUiStatus(){
 if(syncDirty)return '🟠 '+(model.pendingChanges?.length||1)+' operación(es) local(es) pendientes de comprobar con Google Drive.';
 if(!driveIsConnected())return '🟡 Drive sin autorización activa; los datos locales están conservados.';
@@ -83,7 +110,7 @@ try{localStorage.setItem(AUTO_SYNC_KEY,checked?'1':'0')}catch(e){}
 if(checked)syncAutoSchedule(800);else{clearTimeout(autoSyncTimer);autoSyncPending=false;}
 render();
 }
-function syncPanel(){return '<div class="full card"><h2>🔄 Sincronización con Google Drive</h2><p>Une los registros de móvil y tablet sin duplicar identificadores. Comienza por el móvil, después sincroniza la tablet.</p><div class="notice"><b>'+esc(syncUiStatus())+'</b><br>'+esc(syncMessage)+(autoSyncLastSuccess?'<br><b>Última sincronización de esta sesión:</b> '+esc(autoSyncLastSuccess):'')+'</div><div class="actions"><button class="btn" id="syncNow" '+(!driveIsConnected()||syncBusy?'disabled':'')+'>'+(syncBusy?'Sincronizando…':'🔄 Sincronizar ahora')+'</button><button class="btn alt" id="syncBackup">⬇ Copia de seguridad</button></div><div style="margin-top:12px;padding:12px;border:1px solid #e4c58a;border-radius:10px"><b>Resolver conflicto de pruebas</b><p class="muted small">Utiliza los datos de ESTE dispositivo como copia principal de Drive. Crea respaldos local y remoto antes de sustituir la copia. No es una fusión entre móvil y tablet.</p><button class="btn alt" type="button" id="syncPreferLocal" '+(!driveIsConnected()||syncBusy?'disabled':'')+'>Usar datos de este dispositivo en Drive (pruebas)</button></div><label class="field" style="display:flex;align-items:center;gap:10px;margin:12px 0"><input type="checkbox" id="autoSyncToggle" '+(autoSyncEnabled?'checked':'')+'><span><b>Sincronización automática de toda la información (pruebas)</b><br><small>Clientes, productos, movimientos, lotes, fichas, planes, documentos y más. Se sincroniza al guardar y al recuperar la conexión; el código de la app no cambia.</small></span></label><p class="small muted">Requiere internet y conexión autorizada. Experimental: mantén la misma cuenta en ambos dispositivos. No edites el mismo registro simultáneamente. Si hay versiones diferentes de un registro, se detiene sin sobrescribirlo. No desinstales la aplicación sin hacer una copia.</p></div>'}
+function syncPanel(){return '<div class="full card"><h2>🔄 Sincronización con Google Drive</h2><p>Une los registros de móvil y tablet sin duplicar identificadores. Comienza por el móvil, después sincroniza la tablet.</p><div class="notice"><b>'+esc(syncUiStatus())+'</b><br>'+esc(syncMessage)+(autoSyncLastSuccess?'<br><b>Última sincronización de esta sesión:</b> '+esc(autoSyncLastSuccess):'')+'</div><div class="actions"><button class="btn" id="syncNow" '+(!driveIsConnected()||syncBusy?'disabled':'')+'>'+(syncBusy?'Sincronizando…':'🔄 Sincronizar ahora')+'</button><button class="btn alt" id="syncBackup">⬇ Copia de seguridad</button></div><div style="margin-top:12px;padding:12px;border:1px solid #e4c58a;border-radius:10px"><b>Resolver conflicto de pruebas</b><p class="muted small">Utiliza los datos de ESTE dispositivo como copia principal de Drive. Crea respaldos local y remoto antes de sustituir la copia. No es una fusión entre móvil y tablet.</p><button class="btn alt" type="button" id="syncPreferLocal" '+(!driveIsConnected()||syncBusy?'disabled':'')+'>Usar datos de este dispositivo en Drive (pruebas)</button></div><label class="field" style="display:flex;align-items:center;gap:10px;margin:12px 0"><input type="checkbox" id="autoSyncToggle" '+(autoSyncEnabled?'checked':'')+'><span><b>Sincronización automática de toda la información (pruebas)</b><br><small>Clientes, productos, movimientos, lotes, fichas, planes, documentos y más. Se sincroniza al guardar y al recuperar la conexión; si otro dispositivo tiene una versión superior, el antiguo se actualizará sin interrumpir formularios.</small></span></label><p class="small muted">Requiere internet y conexión autorizada. Experimental: mantén la misma cuenta en ambos dispositivos. No edites el mismo registro simultáneamente. Si hay versiones diferentes de un registro, se detiene sin sobrescribirlo. No desinstales la aplicación sin hacer una copia.</p></div>'}
 
 function emptyTestDataset(){const next={...model,version:VERSION,syncEpoch:Math.max(Date.now(),Number(model.syncEpoch)||0)+1,updated:stamp()};for(const key of SYNC_KEYS)next[key]=[];return next;}
 
@@ -203,6 +230,7 @@ if(cloudTechAt>localTechAt){out.tech=cloud.tech;out.techUpdated=cloudTechAt;}
 else if(localTechAt>cloudTechAt){out.tech=local.tech;out.techUpdated=localTechAt;}
 else if(localTechAt&&local.tech!==cloud.tech){throw Error('Perfil técnico editado simultáneamente en dos dispositivos. Sincroniza tras elegir un único perfil.');}
 else if(!localTechAt&&cloudTechAt===localTechAt&&local.tech==='Técnico 1'&&cloud.tech){out.tech=cloud.tech;}
+out.appRelease=Math.max(appReleaseNumber(local.appRelease),appReleaseNumber(cloud.appRelease),appReleaseNumber(APP_RELEASE));
 if(out.customers.filter(c=>!clientArchived(c.id,out)).length>100)throw Error('La unión supera 100 clientes activos; no se modificó ningún dato.');
 return out;
 }
@@ -247,7 +275,7 @@ async function syncPreferLocalTrial(){
   if(remote)await drivePut('agrostock-respaldo-resolucion-pruebas-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json',remote);
   const latest=await driveFiles();
   if(latest.length!==files.length||(files.length&&String(latest[0].version)!==String(files[0].version)))throw Error('Drive cambió durante el respaldo. No se sustituyó la copia principal.');
-  const localSnapshot={...model,version:VERSION,updated:stamp(),pendingChanges:[]};
+  const localSnapshot=publishAppRelease({...model,version:VERSION,updated:stamp(),pendingChanges:[]},remote);
   await drivePut(SYNC_NAME,localSnapshot,files[0]?.id);
   model.pendingChanges=[];await dbPut();markSyncDirty(false);
   autoSyncLastSuccess=new Date().toLocaleString('es-ES');
@@ -274,8 +302,10 @@ backup();model=remote;await save();syncMessage='Reinicio recibido desde Drive. D
 throw Error('El dispositivo contiene una generación distinta de datos. Revisa el estado antes de sincronizar.');
 }
 const merged=remote?mergeCloud(model,remote):{...model};
+merged.appRelease=Math.max(appReleaseNumber(merged.appRelease),appReleaseNumber(remote?.appRelease),appReleaseNumber(APP_RELEASE));
+pendingAppRelease=Math.max(pendingAppRelease,appReleaseNumber(remote?.appRelease));
 const changedHere=SYNC_KEYS.some(k=>JSON.stringify(model[k])!==JSON.stringify(merged[k]))||model.tech!==merged.tech||String(model.techUpdated||'')!==String(merged.techUpdated||'');
-const changedThere=!remote||SYNC_KEYS.some(k=>JSON.stringify(remote[k])!==JSON.stringify(merged[k]))||remote.tech!==merged.tech||String(remote.techUpdated||'')!==String(merged.techUpdated||'');
+const changedThere=!remote||SYNC_KEYS.some(k=>JSON.stringify(remote[k])!==JSON.stringify(merged[k]))||remote.tech!==merged.tech||String(remote.techUpdated||'')!==String(merged.techUpdated||'')||appReleaseNumber(remote.appRelease)<appReleaseNumber(merged.appRelease);
 const total=SYNC_KEYS.reduce((n,k)=>n+(merged[k]||[]).length,0);
 if(changedHere||changedThere){
 if(!automatic){
@@ -287,16 +317,16 @@ if(changedThere){
 if(remote)await drivePut('agrostock-respaldo-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json',remote);
 const latest=await driveFiles();
 if(latest.length!==files.length||(files.length&&latest[0].version!==files[0].version))throw Error('Drive se modificó durante la sincronización; repite la operación.');
-await drivePut(SYNC_NAME,{...merged,version:VERSION,updated:stamp()},files[0]?.id);
+await drivePut(SYNC_NAME,publishAppRelease({...merged,version:VERSION,updated:stamp()},remote),files[0]?.id);
 }
 if(changedHere){model=merged;changedDeviceDuringSync=true;await save();}
 }
 syncMessage='Sincronización completada: '+total+' registros. '+(changedHere?'Datos añadidos al dispositivo. ':'')+(changedThere?'Drive actualizado.':'Drive ya estaba al día.');
 autoSyncLastSuccess=new Date().toLocaleString('es-ES');
-markSyncDirty(false);model.pendingChanges=[];await dbPut();
+markSyncDirty(false);model.pendingChanges=[];model.appRelease=Math.max(appReleaseNumber(model.appRelease),appReleaseNumber(merged.appRelease));await dbPut();
 t('Sincronización completada');
 }catch(e){syncMessage='No se completó: '+e.message;t(automatic?'Sincronización pendiente: revisa Drive en Datos y copias':syncMessage,'error');console.error(e)}
-finally{syncBusy=false;if(!automatic||screen==='datos'||(automatic&&changedDeviceDuringSync&&['inicio','clientes','cliente'].includes(screen)))render();if(autoSyncPending)syncAutoSchedule(4500);}
+finally{syncBusy=false;if(!automatic||screen==='datos'||(automatic&&changedDeviceDuringSync&&['inicio','clientes','cliente'].includes(screen)))render();if(autoSyncPending)syncAutoSchedule(4500);if(pendingAppRelease>appReleaseNumber(APP_RELEASE))maybeUpgradeAppFromSync();}
 }
 let silentReconnectAttempted=false;
 async function trySilentReconnect(){
@@ -1639,7 +1669,7 @@ quickFill();el=$('resetTests');if(el)el.onclick=clearTestDataset;el=$('resetProd
 el=$('techForm');if(el)el.onsubmit=async e=>{e.preventDefault();model.tech=new FormData(e.target).get('tech').trim();model.techUpdated=new Date().toISOString();await save();t('Perfil actualizado')};el=$('exportClient');if(el)el.onclick=()=>exportCustomer($('shareCustomer').value);el=$('restoreFile');if(el)el.onchange=async e=>{try{if(e.target.files[0])await restore(e.target.files[0])}catch(err){t('Error: '+err.message,'error')}};el=$('importClient');if(el)el.onchange=async e=>{try{if(e.target.files[0])await importCustomer(e.target.files[0])}catch(err){t('Error: '+err.message,'error')}};el=$('csvStock');if(el)el.onclick=()=>exportCSV('stock');el=$('csvHistory');if(el)el.onclick=()=>exportCSV('history');el=$('csvPlans');if(el)el.onclick=exportPlansCSV;for(let key of ['Visits','Orders','Alerts']){let btn=$('csv'+key);if(btn)btn.onclick=()=>exportExtraCSV(key.toLowerCase())}}
 $('backupTop').onclick=backup;
 window.addEventListener('online',()=>{syncAutoSchedule(1500);if(autoSyncEnabled&&drivePreferred&&!driveIsConnected())driveStatus='Conecta Google Drive para reanudar los cambios pendientes'});
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncAutoSchedule(2000)});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){syncAutoSchedule(2000);if(pendingAppRelease>appReleaseNumber(APP_RELEASE))maybeUpgradeAppFromSync();}});
 if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(e=>console.warn('No se pudo activar el modo offline',e));
 (async()=>{try{db=await openDB();let saved=await dbGet();if(saved){ensure(saved);model=saved}if(model.pendingChanges?.length)markSyncDirty(true);render();/* La reconexión tras reiniciar requiere pulsar Conectar Drive; evita ventanas OAuth no solicitadas. */}catch(e){console.error(e);$('app').innerHTML='<div class="alert error"><h2>No se puede abrir la base de datos local</h2>Utiliza Chrome, Edge o Firefox con almacenamiento habilitado, fuera del modo privado. Si abres el archivo desde un móvil, quizá necesites un navegador que admita IndexedDB para archivos locales.</div>'}})();
 </script></body></html>
