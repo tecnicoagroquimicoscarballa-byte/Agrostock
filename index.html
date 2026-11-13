@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='109', APP_RELEASE_DATE='13/11/2026';
+const APP_RELEASE='110', APP_RELEASE_DATE='13/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -81,7 +81,7 @@ function maybeUpgradeAppFromSync(){
  window.location.href='./?actualizar=sync&minVersion='+wanted+'&t='+Date.now();
 }
 function syncUiStatus(){
-if(syncDirty)return '🟠 '+(model.pendingChanges?.length||1)+' operación(es) local(es) pendientes de comprobar con Google Drive.';
+if(syncDirty)return '🟠 '+(model.pendingChanges?.length||1)+' cambio(s) local(es) pendientes de sincronizar.'+(syncMessage.startsWith('No se completó:')?' Motivo: '+syncMessage.slice('No se completó:'.length).trim():!navigator.onLine?' Sin conexión a internet.':!driveIsConnected()?' Conecta de nuevo Google Drive para enviarlos.':' Pulsa «Sincronizar ahora» para comprobarlos.');
 if(!driveIsConnected())return '🟡 Drive sin autorización activa; los datos locales están conservados.';
 return autoSyncLastSuccess?'🟢 Última comprobación con Drive: '+autoSyncLastSuccess:'🔵 Conectado; pendiente de la primera comprobación.';
 }
@@ -286,7 +286,7 @@ async function syncPreferLocalTrial(){
 }
 async function syncNow(automatic=false){
 if(syncBusy)return;
-if(!navigator.onLine||!driveIsConnected())return t('Conecta Google Drive con internet antes de sincronizar','error');
+if(!navigator.onLine||!driveIsConnected()){syncMessage=!navigator.onLine?'No se completó: sin conexión a internet.':'No se completó: Google Drive no está conectado o ha caducado la autorización.';render();return t(syncMessage,'error');}
 let changedDeviceDuringSync=false;
 syncBusy=true;syncMessage='Consultando registros en Drive…';if(!automatic)render();
 try{
@@ -325,7 +325,7 @@ syncMessage='Sincronización completada: '+total+' registros. '+(changedHere?'Da
 autoSyncLastSuccess=new Date().toLocaleString('es-ES');
 markSyncDirty(false);model.pendingChanges=[];model.appRelease=Math.max(appReleaseNumber(model.appRelease),appReleaseNumber(merged.appRelease));await dbPut();
 t('Sincronización completada');
-}catch(e){syncMessage='No se completó: '+e.message;t(automatic?'Sincronización pendiente: revisa Drive en Datos y copias':syncMessage,'error');console.error(e)}
+}catch(e){syncMessage='No se completó: '+e.message;t(automatic?'Sincronización pendiente: '+e.message:syncMessage,'error');console.error(e)}
 finally{syncBusy=false;if(!automatic||screen==='datos'||(automatic&&changedDeviceDuringSync&&['inicio','clientes','cliente'].includes(screen)))render();if(autoSyncPending)syncAutoSchedule(4500);if(pendingAppRelease>appReleaseNumber(APP_RELEASE))maybeUpgradeAppFromSync();}
 }
 let silentReconnectAttempted=false;
