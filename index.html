@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='104', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='105', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -877,15 +877,56 @@ function autoLot(cid,pid,delta){
  const summary=lotSummary(cid,pid),positive=summary.lots.filter(x=>x.amount>0.000001);
  return summary.unassigned===0&&positive.length===1&&positive[0].amount>=-delta?positive[0].lot:'';
 }
+function unassignedLotTargets(cid,pid){
+ const p=prod(pid);if(!p)return [];
+ const group=stockGroupKey(p);
+ return model.movements.filter(m=>m.customerId===cid&&!m.lot&&['entrada','tratamiento','salida','revision'].includes(m.kind)&&stockGroupKey(prod(m.productId))===group)
+  .map(m=>({m,free:lotUnassignedMovementBalance(m)|| (m.kind==='revision'?Math.max(0,Math.abs(movementStockDelta(m,prod(m.productId)))-model.movements.filter(x=>x.kind==='asignacion_lote'&&x.pendingMovementId===m.id).reduce((n,x)=>n+(Number(x.lotQtyBase)||0),0)):0)}))
+  .filter(x=>x.free>0.000001).reverse();
+}
+function lotManagementForProduct(cid,pid){
+ const p=prod(pid);if(!p)return '';
+ const targets=unassignedLotTargets(cid,pid),lots=lotSummary(cid,pid).lots;
+ const title=m=>m.kind==='entrada'?'COMPRA':m.kind==='tratamiento'?'APLICACIÓN':m.kind==='salida'?'SALIDA':m.delta>0?'REVISIÓN · SOBRANTE':'REVISIÓN · FALTANTE';
+ const options=targets.map(x=>'<option value="'+esc(x.m.id)+'">'+esc(title(x.m)+' · '+x.m.date+' · '+fmt(fromStockBase(x.free,p))+' '+stockUnit(p)+(x.m.kind==='revision'?' por asignar (observado '+fmt(fromStockBase(Number(x.m.after??(Number(x.m.before||0)+Number(x.m.delta||0))),p))+' '+stockUnit(p)+')':''))+'</option>').join('');
+ const choices=lots.map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot+' · '+fmt(fromStockBase(x.amount,p))+' '+stockUnit(p))+'</option>').join('');
+ const hint=targets.length?'Selecciona el movimiento que quieres identificar y después su lote.':'Todos los movimientos de este producto que admiten asignación ya tienen lote, o no hay diferencias pendientes.';
+ return '<details class="card" style="margin-top:12px" id="manageProductLots"><summary style="cursor:pointer;font-weight:700">Gestionar lotes · '+targets.length+' movimientos por identificar</summary><p class="muted small">Es opcional. Puedes identificar una compra, una aplicación, una salida o la diferencia de una revisión. No cambia las existencias totales.</p>'
+ +(targets.length?'<form class="unified-lot-form stack" data-cid="'+esc(cid)+'" data-pid="'+esc(p.id)+'"><div class="field"><label>Movimiento</label><select name="movementId" required><option value="">Elige el movimiento</option>'+options+'</select></div><div class="field"><label>Lote</label><select name="targetLot"><option value="">Elige un lote o escribe uno nuevo</option>'+choices+'<option value="__nuevo__">Otro lote…</option></select><input name="manualLot" maxlength="100" placeholder="Nº de lote (si no aparece en el listado)" autocomplete="off"></div><div class="field"><label>Cantidad que corresponde a ese lote ('+esc(stockUnit(p))+')</label><input name="assignQty" type="number" step="'+(discreteStock(p)?'1':'any')+'" min="0.000001" required placeholder="Cantidad a identificar"></div><button type="submit" class="btn">Guardar lote</button></form>':'<p class="muted small">'+hint+'</p>')
+ +'</details>';
+}
+async function saveUnifiedLotAssignment(e){
+ e.preventDefault();
+ const form=e.target,cid=form.dataset.cid,pid=form.dataset.pid,p=prod(pid);
+ const target=unassignedLotTargets(cid,pid).find(x=>x.m.id===form.querySelector('[name=movementId]').value);
+ const choice=form.querySelector('[name=targetLot]').value;
+ const lot=String(choice&&choice!=='__nuevo__'?choice:form.querySelector('[name=manualLot]').value||'').trim();
+ const val=form.querySelector('[name=assignQty]').value;
+ const amount=p&&val?(discreteStock(p)?Number(val):toBase(Number(val),p.unit)):NaN;
+ if(!target||!lot||!Number.isFinite(amount)||amount<=0||amount>target.free+.000001||(discreteStock(p)&&!Number.isInteger(amount)))return t('Revisa el movimiento, el lote y la cantidad.','error');
+ const isPlus=movementStockDelta(target.m,prod(target.m.productId))>0;
+ const summary=lotSummary(cid,pid);
+ const available=summary.lots.find(x=>x.lot.toLowerCase()===lot.toLowerCase())?.amount||0;
+ if(!isPlus&&available+0.000001<amount&&!confirm('El lote '+lot+' tiene '+fmt(fromStockBase(available,p))+' '+stockUnit(p)+' teóricos y vas a atribuirle '+fmt(fromStockBase(amount,p))+' '+stockUnit(p)+'. Quedará negativo. ¿Continuar?'))return;
+ const adjustment={id:id(),customerId:cid,productId:pid,date:today(),kind:'asignacion_lote',
+  sourceKind:target.m.kind==='entrada'?'entrada':target.m.kind==='revision'?(isPlus?'revision_positiva':'revision_negativa'):target.m.kind,
+  delta:0,qty:0,qtyUnit:p.unit,lot,lotQtyBase:amount,pendingMovementId:target.m.id,recorded:stamp(),technician:model.tech,
+  notes:'Lote asignado a movimiento anterior, sin alterar las existencias totales'};
+ model.movements.push(adjustment);
+ try{await save()}catch(err){model.movements.pop();return t('No se pudo guardar el lote: '+err.message,'error')}
+ selected=cid;customerTab='stock';stockHistoryProductId=pid;render();
+ $('manageProductLots')?.setAttribute('open','');$('stockProductHistory')?.scrollIntoView({block:'start'});
+ t('Lote guardado. El stock total sigue siendo el mismo.');
+}
 function stockProductHistory(cid,pid){
  const product=prod(pid);if(!product)return '';
  const key=stockGroupKey(product);
  const rows=model.movements.filter(m=>m.customerId===cid&&stockGroupKey(prod(m.productId))===key).slice().reverse();
- return `<div class="card" id="stockProductHistory" style="margin-top:14px"><div class="row between"><div><h3>Movimientos de ${esc(stockDisplayName(product))}</h3><p class="muted small">${rows.length} movimientos · Existencias actuales: <b>${esc(stockView(cid,pid))}</b></p></div><button class="btn alt" type="button" id="closeStockHistory">Cerrar</button></div>${lotSummaryHTML(cid,pid)}${movementTable(rows)}</div>`;
+ return `<div class="card" id="stockProductHistory" style="margin-top:14px"><div class="row between"><div><h3>Movimientos de ${esc(stockDisplayName(product))}</h3><p class="muted small">${rows.length} movimientos · Existencias actuales: <b>${esc(stockView(cid,pid))}</b></p></div><button class="btn alt" type="button" id="closeStockHistory">Cerrar</button></div>${lotSummaryHTML(cid,pid)}${lotManagementForProduct(cid,pid)}${movementTable(rows)}</div>`;
 }
 function detail(){let c=cust(selected);if(!c)return `<div class="alert">Cliente no encontrado.</div>`;let tabs=[['stock','Existencias'],['historial','Historial'],['tratamientos','Aplicaciones'],['planes','Plan abonado'],['documentos','Documentos'],['visitas','Visitas'],['pedidos','Pedidos'],['alertas','Alertas']];let content='';if(customerTab==='stock'){let p=productsFor(c.id);content=p.length?`<p class="muted small">Pulsa un producto para consultar solo sus compras, aplicaciones y revisiones.</p><div class="tablewrap"><table><thead><tr><th>Producto</th><th>Unidad</th><th>Existencias</th><th>Estado</th></tr></thead><tbody>${p.map(x=>{let amount=stockBase(c.id,x.id);return `<tr><td><button type="button" class="btn alt" data-stock-history="${esc(x.id)}" style="text-align:left;padding:7px 10px">${esc(stockDisplayName(x))} ▸</button><div class="muted small">${esc(catLabel(x.category))}</div></td><td>${esc(stockUnit(x))}</td><td><b>${stockView(c.id,x.id)}</b></td><td><span class="pill ${amount<0?'red':amount===0?'warn':''}">${amount<0?'Negativo · compra pendiente':amount===0?'Agotado':'Disponible'}</span></td></tr>`}).join('')}</tbody></table></div>${stockHistoryProductId&&p.some(x=>x.id===stockHistoryProductId)?stockProductHistory(c.id,stockHistoryProductId):''}`:'<div class="empty">Sin existencias registradas todavía.</div>'}
-else if(customerTab==='historial')content=pendingRegularizationPanel(c.id)+movementTable(model.movements.filter(x=>x.customerId===c.id).slice().reverse());
-else if(customerTab==='tratamientos')content=pendingRegularizationPanel(c.id)+movementTable(model.movements.filter(x=>x.customerId===c.id&&x.kind==='tratamiento').slice().reverse());
+else if(customerTab==='historial')content=movementTable(model.movements.filter(x=>x.customerId===c.id).slice().reverse());
+else if(customerTab==='tratamientos')content=movementTable(model.movements.filter(x=>x.customerId===c.id&&x.kind==='tratamiento').slice().reverse());
 else if(customerTab==='planes')content=clientPlansPanel(c.id);
     else if(customerTab==='visitas')content=visitsList(c.id);
     else if(customerTab==='pedidos')content=ordersList(c.id);
@@ -1573,6 +1614,7 @@ document.querySelectorAll('[data-customer-import]').forEach(b=>b.onclick=()=>inc
 const cdSearch=$('clientDirectorySearch');if(cdSearch)cdSearch.oninput=e=>{customerDirectoryFilter=e.target.value;const pos=e.target.selectionStart;render();const n=$('clientDirectorySearch');if(n){n.focus();n.setSelectionRange(pos,pos)}};
 const dirFile=$('directoryCustomersImport');if(dirFile)dirFile.onchange=async e=>{try{if(e.target.files?.[0])await importCustomerDirectory(e.target.files[0])}catch(err){t(err.message,'error');alert('No se ha importado el directorio: '+err.message)}};
 
+document.querySelectorAll('.unified-lot-form').forEach(f=>f.onsubmit=saveUnifiedLotAssignment);
 document.querySelectorAll('.optional-lot-assignment').forEach(f=>f.onsubmit=saveOptionalLotAssignment);
 document.querySelectorAll('.assign-purchase-lot').forEach(f=>f.onsubmit=savePurchaseLotAssignment);
 document.querySelectorAll('.assign-revision-lot').forEach(f=>f.onsubmit=saveRevisionLotAssignment);
