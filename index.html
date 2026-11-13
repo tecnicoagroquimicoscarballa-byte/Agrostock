@@ -18,7 +18,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 'use strict';
-const APP_RELEASE='101', APP_RELEASE_DATE='12/11/2026';
+const APP_RELEASE='102', APP_RELEASE_DATE='12/11/2026';
 const VERSION=3, GOOGLE_OAUTH_CLIENT_ID='708665310867-i4kvrt02fpmqhac0pfipnhi7f899a625.apps.googleusercontent.com', DBNAME='AgroStockLocal_v1', STORE='database';
 const U=['kg','g','L','cm³','ud.'];
 let model={version:VERSION,tech:'Técnico 1',customers:[],products:[],movements:[],documents:[],plans:[],visits:[],orders:[],alerts:[],clientStatuses:[],productStatuses:[],productSelections:[],customerDirectory:[],productMappings:[],updated:''};
@@ -928,6 +928,19 @@ function updateMultiLotQuantityHint(productRow,line){
 function updateMultiLotChoices(productRow){
  const form=$('multiMovement');if(!form)return;
  const kind=form.multiKind.value,p=prod(productRow.querySelector('[name=lineProduct]').value);
+ if(kind==='revision'){
+  for(const line of productRow.querySelectorAll('.multi-lot-line')){
+   const select=line.querySelector('[name=lineLot]');if(!select||select.tagName!=='SELECT')continue;
+   const previous=select.value;
+   const lots=p?lotSummary(selected,p.id).lots.filter(x=>x.amount>0.000001):[];
+   select.innerHTML='<option value="">Sin lote (opcional)</option>'+lots.map(x=>'<option value="'+esc(x.lot)+'">'+esc(x.lot)+' · '+esc(fmt(fromStockBase(x.amount,p))+' '+stockUnit(p))+' teóricos</option>').join('')+'<option value="__otro__">Escribir otro lote…</option>';
+   select.value=[...select.options].some(x=>x.value===previous)?previous:'';
+   const manual=line.querySelector('.multi-revision-other');
+   const toggle=()=>{if(manual){manual.hidden=select.value!=='__otro__';manual.disabled=select.value!=='__otro__';manual.required=select.value==='__otro__';}};
+   select.onchange=toggle;toggle();
+  }
+  return;
+ }
  if(!['tratamiento','salida'].includes(kind)||!p)return;
  const summary=lotSummary(selected,p.id),lots=summary.lots.filter(x=>x.amount>0.000001);
  // A lot already assigned to another line of the same product is not offered again.
@@ -1024,7 +1037,7 @@ function multiAddLotLine(productRow){
  const label=entry?'Nº de envases':revision?'Cantidad contada':'Cantidad utilizada';
  const units=U.map(u=>'<option value="'+esc(u)+'">'+esc(u)+'</option>').join('');
  line.innerHTML='<div style="display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,0.88fr);gap:10px;align-items:start">'
- +'<div class="field" style="min-width:0"><label>Lote (opcional)</label>'+(entry||revision?'<input name="lineLot" type="text" maxlength="100" placeholder="Sin lote">':'<select name="lineLot"><option value="">Lote / FIFO</option></select>')+'</div>'
+ +'<div class="field" style="min-width:0"><label>Lote (opcional)</label>'+(entry?'<input name="lineLot" type="text" maxlength="100" placeholder="Sin lote">':revision?'<select name="lineLot"><option value="">Sin lote (opcional)</option></select><input type="text" class="multi-revision-other" maxlength="100" placeholder="Escribe el lote" hidden disabled>':'<select name="lineLot"><option value="">Lote / FIFO</option></select>')+'</div>'
  +'<div class="field" style="min-width:0"><label class="multi-qty-label">'+label+' *</label><input type="number" name="lineQty" min="'+(revision?'0':entry?'1':'0.000001')+'" step="'+(entry?'1':'any')+'" inputmode="'+(entry?'numeric':'decimal')+'" placeholder="Cantidad"></div></div>'
  +(!entry&&!revision?'<div class="multi-lot-available muted small" aria-live="polite" style="margin-top:4px">Selecciona un lote para ver su saldo.</div>':'')
  +'<div class="row between" style="margin-top:5px;gap:8px"><div class="field" style="flex:0 1 130px;min-width:88px"><label>Unidad</label><select name="lineUnit">'+units+'</select></div><button class="btn danger multi-remove-lot" type="button" style="padding:7px 10px;min-height:38px">Quitar</button></div>';
@@ -1040,9 +1053,12 @@ function multiAddLotLine(productRow){
 function multiBuildMove(form,row,lotLine){
  const pid=row.querySelector('[name=lineProduct]').value,p=prod(pid);
  if(!p)throw Error('Selecciona un producto en todas las líneas.');
+ const chosenLot=lotLine.querySelector('[name=lineLot]').value;
+ const finalLot=chosenLot==='__otro__'?lotLine.querySelector('.multi-revision-other')?.value.trim():chosenLot;
+ if(chosenLot==='__otro__'&&!finalLot)throw Error('Escribe el número del nuevo lote.');
  const f=new FormData(),fields={customer:selected,kind:form.multiKind.value,date:form.multiDate.value,product:pid,
   qty:lotLine.querySelector('[name=lineQty]').value,qtyUnit:lotLine.querySelector('[name=lineUnit]').value,
-  purchasePackSize:row.querySelector('[name=linePack]').value,lot:lotLine.querySelector('[name=lineLot]').value,
+  purchasePackSize:row.querySelector('[name=linePack]').value,lot:finalLot,
   plot:form.multiPlot.value,area:form.multiArea.value,notes:form.multiNotes.value,planLine:''};
  for(const [k,v] of Object.entries(fields))f.set(k,String(v??''));
  return validateMove(f);
