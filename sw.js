@@ -24,7 +24,12 @@ self.addEventListener('fetch',event=>{
    }
    try{
     const response=await fetch(new Request(request,{cache:'no-store'}));
-    if(response.ok)await cache.put(INDEX,response.clone());
+    if(!response.ok){const previous=await cache.match(INDEX);return previous||response;}
+    const old=await cache.match(INDEX);
+    const version=async r=>{if(!r)return 0;const body=await r.clone().text();const match=body.match(/const APP_RELEASE='(\d+)'/);return match?Number(match[1]):0;};
+    const current=await version(response),saved=await version(old);
+    if(saved>current&&old)return old;
+    await cache.put(INDEX,response.clone());
     return response;
    }catch(error){
     const saved=await cache.match(INDEX);
